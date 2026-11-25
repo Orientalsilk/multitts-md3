@@ -57,8 +57,17 @@ public class CloudAiTtsEngine implements h {
         this.engine = engine;
         this.speaker = speaker;
         this.config = CloudTtsConfig.fromEngine(engine);
-        if (speaker != null && !TextUtils.isEmpty(speaker.param)) {
-            this.config.voice = speaker.param;
+        if (speaker != null) {
+            boolean isCloneModel = this.config.providerType == CloudTtsProviderType.MIMO
+                    && ("mimo-v2.5-tts-voiceclone".equalsIgnoreCase(this.config.model)
+                        || "mimo-v2.5-tts-voicedesign".equalsIgnoreCase(this.config.model));
+            if (!isCloneModel && !TextUtils.isEmpty(speaker.code)
+                    && !speaker.code.equals(engine.code)
+                    && !speaker.code.startsWith(engine.code + "_")) {
+                this.config.voice = speaker.code;
+            } else if (!TextUtils.isEmpty(speaker.param)) {
+                this.config.voice = speaker.param;
+            }
         }
     }
 

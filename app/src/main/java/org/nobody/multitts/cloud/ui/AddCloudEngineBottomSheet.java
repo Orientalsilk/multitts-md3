@@ -493,8 +493,17 @@ public class AddCloudEngineBottomSheet {
     @SuppressWarnings("unchecked")
     private static int ensureDefaultSpeakerViaReflection(Activity activity, Engine target, CloudTtsConfig config) {
         try {
+            boolean isCloneOrDesign = config.providerType == CloudTtsProviderType.MIMO
+                    && ("mimo-v2.5-tts-voiceclone".equalsIgnoreCase(config.model)
+                        || "mimo-v2.5-tts-voicedesign".equalsIgnoreCase(config.model));
             Speaker sp = new Speaker();
-            sp.code = target.code;
+            if (isCloneOrDesign && !TextUtils.isEmpty(config.referenceAudioName)) {
+                sp.code = config.referenceAudioName;
+            } else if (!TextUtils.isEmpty(config.voice)) {
+                sp.code = config.voice;
+            } else {
+                sp.code = target.code + "_default";
+            }
             sp.group = target.code;
             sp.name = target.name;
             sp.locale = "zh-CN";
@@ -508,9 +517,6 @@ public class AddCloudEngineBottomSheet {
             sp.speed = 1.0f;
             sp.pitch = 1.0f;
             sp.volume = 1.0f;
-            boolean isCloneOrDesign = config.providerType == CloudTtsProviderType.MIMO
-                    && ("mimo-v2.5-tts-voiceclone".equalsIgnoreCase(config.model)
-                        || "mimo-v2.5-tts-voicedesign".equalsIgnoreCase(config.model));
             sp.param = isCloneOrDesign ? "" : (config.voice != null ? config.voice : "");
 
             Class<?> qc = Class.forName("Q6.c");
@@ -637,7 +643,9 @@ public class AddCloudEngineBottomSheet {
                 }
                 Speaker sp = existingSp != null ? existingSp : new Speaker();
                 sp.group = engine.code;
-                if (TextUtils.isEmpty(sp.code)) {
+                if (!TextUtils.isEmpty(vId)) {
+                    sp.code = vId;
+                } else if (TextUtils.isEmpty(sp.code)) {
                     sp.code = engine.code + "_" + UUID.randomUUID().toString().substring(0, 6);
                 }
                 sp.name = vName;
