@@ -1,5 +1,7 @@
 package org.nobody.multitts.cloud.ui;
 
+import android.content.Intent;
+
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -96,9 +98,17 @@ public class CloudEngineActivity extends AppCompatActivity {
         root.addView(fab, fabLp);
 
         fab.setOnClickListener(v -> {
-            Engine empty = new Engine(UUID.randomUUID().toString(), "");
-            empty.type = CloudTtsProviderType.OPENAI.engineType;
-            AddCloudEngineBottomSheet.show(CloudEngineActivity.this, empty, saved -> reloadEngines());
+            PopupMenu menu = new PopupMenu(this, fab);
+            CloudTtsProviderType[] values = CloudTtsProviderType.values();
+            for (int i = 0; i < values.length; i++) {
+                menu.getMenu().add(0, i, i, "添加 " + values[i].displayName);
+            }
+            menu.setOnMenuItemClickListener(item -> {
+                CloudTtsProviderType chosen = values[item.getItemId()];
+                AddCloudEngineBottomSheet.show(this, chosen, e -> reloadEngines());
+                return true;
+            });
+            menu.show();
         });
 
         setContentView(root);
