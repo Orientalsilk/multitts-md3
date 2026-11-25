@@ -366,19 +366,9 @@ public class AddCloudEngineBottomSheet {
 
     private static void saveEngineViaReflection(Activity activity, Engine target, boolean isUpdate) {
         try {
-            Class<?> dbClass = Class.forName("Q6.c");
-            Method tMethod = dbClass.getMethod("t", android.content.Context.class);
-            Object db = tMethod.invoke(null, activity);
-            Object dao = db.getClass().getMethod("engineDao").invoke(db);
-            if (isUpdate) {
-                dao.getClass().getMethod("update", Engine[].class).invoke(dao, (Object) new Engine[] { target });
-            } else {
-                dao.getClass().getMethod("insert", Engine[].class).invoke(dao, (Object) new Engine[] { target });
-            }
-            try {
-                db.getClass().getMethod("close").invoke(db);
-            } catch (Throwable ignored) {
-            }
+            Class<?> helper = Class.forName("K6.d");
+            Method saveMethod = helper.getMethod("l", Engine.class);
+            saveMethod.invoke(null, target);
         } catch (Throwable t) {
             Toast.makeText(activity, "保存失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
         }
