@@ -81,8 +81,8 @@ public final class AddCloudEngineBottomSheet {
             etModel.setText(config.providerType.defaultModel);
         });
 
-        MaterialButton btnTest = new MaterialButton(activity, null,
-                com.google.android.material.R.attr.materialButtonTonalStyle);
+MaterialButton btnTest = new MaterialButton(activity, null,
+        com.google.android.material.R.attr.materialButtonTonalStyle);
         btnTest.setText("连接测试");
         container.addView(btnTest, lpMarginTop(activity, 14));
 
