@@ -1,12 +1,13 @@
 package org.nobody.multitts.cloud;
 
 /**
- * 云端 AI TTS 提供商枚举，对齐 legado-with-MD3 的 CloudTtsProviderType。
+ * 云端 AI TTS 提供商枚举，对齐 legado-with-MD3 并扩展 Fish Audio。
  */
 public enum CloudTtsProviderType {
     OPENAI("cloud_openai", "OpenAI Speech", "https://api.openai.com/v1", "gpt-4o-mini-tts", "alloy", true),
     GEMINI("cloud_gemini", "Google Gemini TTS", "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash-preview-tts", "Kore", true),
     MIMO("cloud_mimo", "Xiaomi MiMo", "https://api.xiaomimimo.com/v1", "mimo-v2.5-tts", "mimo_default", false),
+    FISHAUDIO("cloud_fishaudio", "Fish Audio", "https://api.fish.audio/v1", "s1", "", false),
     AZURE("cloud_azure", "Microsoft Azure Speech", "https://eastasia.tts.speech.microsoft.com", "neural", "zh-CN-XiaoxiaoNeural", false),
     ALIBABA("cloud_dashscope", "Alibaba Cloud Model Studio", "https://dashscope.aliyuncs.com/api/v1", "cosyvoice-v2", "longxiaochun_v2", true),
     POLLY("cloud_polly", "Amazon Polly", "https://polly.us-east-1.amazonaws.com", "neural", "Zhiyu", false),
@@ -17,7 +18,6 @@ public enum CloudTtsProviderType {
     public final String defaultBaseUrl;
     public final String defaultModel;
     public final String defaultVoice;
-    /** true 表示优先使用自然语言 instruction 控制语气，false 表示使用 style 字段 */
     public final boolean usesInstruction;
 
     CloudTtsProviderType(
