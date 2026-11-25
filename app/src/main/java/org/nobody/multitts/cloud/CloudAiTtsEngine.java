@@ -8,49 +8,36 @@ import android.util.Base64;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.TimeUnit;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
-import okhttp3.Call;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.nobody.multitts.tts.engine.Engine;
 import org.nobody.multitts.tts.speaker.Speaker;
 
 /**
- * 统一云端 AI TTS 引擎适配器，实现 MultiTTS 原生 R6.h 接口。
- * 直接复用包内已集成的 OkHttp3，支持 OpenAI / Gemini / MiMo (SSE) / Volcengine / 阿里云等。
+ * 统一云端 AI TTS 引擎适配器（纯系统 HttpURLConnection 实现，彻底摆脱第三方 OkHttp 混淆类名依赖）。
  */
 public class CloudAiTtsEngine implements h {
-
-    private static final MediaType JSON_MEDIA = MediaType.get("application/json; charset=utf-8");
-    private static final MediaType SSML_MEDIA = MediaType.get("application/ssml+xml; charset=utf-8");
-
-    private static final OkHttpClient SHARED_CLIENT = new OkHttpClient.Builder()
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
-            .build();
 
     private final Context context;
     private final Engine engine;
     private final Speaker speaker;
     private final CloudTtsConfig config;
-    private final AtomicReference<Call> activeCall = new AtomicReference<>();
+    private final AtomicReference<HttpURLConnection> activeConn = new AtomicReference<>();
     private volatile boolean cancelled = false;
 
     public CloudAiTtsEngine(Context context, Engine engine, Speaker speaker) {
-        this.context = context.getApplicationContext();
+        this.context = context != null ? context.getApplicationContext() : null;
         this.engine = engine;
         this.speaker = speaker;
         this.config = CloudTtsConfig.fromEngine(engine);
@@ -61,16 +48,18 @@ public class CloudAiTtsEngine implements h {
 
     @Override
     public void c() {
-        // 初始化：OkHttpClient 为全局复用，此处无需额外阻塞操作
         cancelled = false;
     }
 
     @Override
     public void cancel() {
         cancelled = true;
-        Call call = activeCall.getAndSet(null);
-        if (call != null) {
-            call.cancel();
+        HttpURLConnection conn = activeConn.getAndSet(null);
+        if (conn != null) {
+            try {
+                conn.disconnect();
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -92,7 +81,6 @@ public class CloudAiTtsEngine implements h {
             if (cancelled || audioBytes == null || audioBytes.length == 0) {
                 return;
             }
-            // 通过 MultiTTS 的 R6.g (p020c2.a) 回调写入音频流
             deliverAudioOrError(callback, audioBytes, null);
         } catch (Exception e) {
             if (!cancelled) {
@@ -133,10 +121,12 @@ public class CloudAiTtsEngine implements h {
                 return callGemini(text);
             case MIMO:
                 return callMimoSse(text);
+            case FISHAUDIO:
+                return callFishAudio(text);
             case VOLCENGINE:
                 return callVolcengine(speed, pitch, text);
             case AZURE:
-                return callAzure(speed, pitch, text);
+                return callAzure(speed, text);
             case ALIBABA:
                 return callAlibabaDashScope(speed, text);
             default:
@@ -145,18 +135,14 @@ public class CloudAiTtsEngine implements h {
     }
 
     private byte[] callOpenAi(float speed, String text) throws Exception {
-        String url = config.effectiveBaseUrl() + "/audio/speech";
-        if (config.effectiveBaseUrl().endsWith("/audio/speech")) {
-            url = config.effectiveBaseUrl();
-        }
+        String base = config.effectiveBaseUrl();
+        String url = base.endsWith("/audio/speech") ? base : base + "/audio/speech";
         float clampedSpeed = Math.max(0.25f, Math.min(4.0f, speed));
         JSONObject body = new JSONObject();
         body.put("model", config.model);
         body.put("input", text);
         if (config.voice.startsWith("voice_")) {
-            JSONObject voiceObj = new JSONObject();
-            voiceObj.put("id", config.voice);
-            body.put("voice", voiceObj);
+            body.put("voice", new JSONObject().put("id", config.voice));
         } else {
             body.put("voice", config.voice);
         }
@@ -166,12 +152,29 @@ public class CloudAiTtsEngine implements h {
             body.put("instructions", config.instructions);
         }
 
-        Request request = new Request.Builder()
-                .url(url)
-                .addHeader("Authorization", "Bearer " + config.apiKey)
-                .post(RequestBody.create(body.toString(), JSON_MEDIA))
-                .build();
-        return executeBytes(request);
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Authorization", "Bearer " + config.apiKey);
+        headers.put("Content-Type", "application/json; charset=utf-8");
+        return executeBytes("POST", url, headers, body.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private byte[] callFishAudio(String text) throws Exception {
+        String base = config.effectiveBaseUrl();
+        String url = base.endsWith("/tts") ? base : base + "/tts";
+        JSONObject body = new JSONObject();
+        body.put("text", text);
+        body.put("format", "wav");
+        if (!TextUtils.isEmpty(config.voice)) {
+            body.put("reference_id", config.voice);
+        }
+
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Authorization", "Bearer " + config.apiKey);
+        headers.put("Content-Type", "application/json; charset=utf-8");
+        if (!TextUtils.isEmpty(config.model)) {
+            headers.put("model", config.model);
+        }
+        return executeBytes("POST", url, headers, body.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private byte[] callGemini(String text) throws Exception {
@@ -185,24 +188,20 @@ public class CloudAiTtsEngine implements h {
 
         JSONObject voiceConfig = new JSONObject()
                 .put("prebuiltVoiceConfig", new JSONObject().put("voiceName", config.voice));
-        JSONObject speechConfig = new JSONObject().put("voiceConfig", voiceConfig);
         JSONObject genConfig = new JSONObject()
                 .put("responseModalities", new JSONArray().put("AUDIO"))
-                .put("speechConfig", speechConfig);
+                .put("speechConfig", new JSONObject().put("voiceConfig", voiceConfig));
 
-        JSONObject content = new JSONObject()
-                .put("parts", new JSONArray().put(new JSONObject().put("text", prompt)));
         JSONObject body = new JSONObject()
-                .put("contents", new JSONArray().put(content))
+                .put("contents", new JSONArray().put(
+                        new JSONObject().put("parts", new JSONArray().put(new JSONObject().put("text", prompt)))))
                 .put("generationConfig", genConfig);
 
-        Request request = new Request.Builder()
-                .url(url)
-                .addHeader("x-goog-api-key", config.apiKey)
-                .post(RequestBody.create(body.toString(), JSON_MEDIA))
-                .build();
+        Map<String, String> headers = new HashMap<>();
+        headers.put("x-goog-api-key", config.apiKey);
+        headers.put("Content-Type", "application/json; charset=utf-8");
 
-        String jsonStr = new String(executeBytes(request), StandardCharsets.UTF_8);
+        String jsonStr = new String(executeBytes("POST", url, headers, body.toString().getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8);
         JSONObject resp = new JSONObject(jsonStr);
         JSONObject inlineData = resp.getJSONArray("candidates")
                 .getJSONObject(0)
@@ -220,57 +219,56 @@ public class CloudAiTtsEngine implements h {
 
     private byte[] callMimoSse(String text) throws Exception {
         String url = config.effectiveBaseUrl() + "/chat/completions";
-        JSONObject audio = new JSONObject()
-                .put("format", "wav")
-                .put("voice", config.voice);
-        JSONArray messages = new JSONArray()
-                .put(new JSONObject().put("role", "assistant").put("content", text));
         JSONObject body = new JSONObject()
                 .put("model", config.model)
-                .put("messages", messages)
-                .put("audio", audio)
+                .put("messages", new JSONArray().put(
+                        new JSONObject().put("role", "assistant").put("content", text)))
+                .put("audio", new JSONObject().put("format", "wav").put("voice", config.voice))
                 .put("stream", true);
 
-        Request request = new Request.Builder()
-                .url(url)
-                .addHeader("api-key", config.apiKey)
-                .post(RequestBody.create(body.toString(), JSON_MEDIA))
-                .build();
+        HttpURLConnection conn = openConnection("POST", url);
+        conn.setRequestProperty("api-key", config.apiKey);
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        activeConn.set(conn);
 
-        Call call = SHARED_CLIENT.newCall(request);
-        activeCall.set(call);
         ByteArrayOutputStream pcmOut = new ByteArrayOutputStream();
-        try (Response response = call.execute()) {
-            if (!response.isSuccessful() || response.body() == null) {
-                throw new IOException("HTTP " + response.code() + " " + response.message());
+        try {
+            byte[] payloadBytes = body.toString().getBytes(StandardCharsets.UTF_8);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(payloadBytes);
             }
-            BufferedReader reader = new BufferedReader(new InputStreamReader(response.body().byteStream(), StandardCharsets.UTF_8));
-            String line;
-            while ((line = reader.readLine()) != null && !cancelled) {
-                if (!line.startsWith("data:")) {
-                    continue;
-                }
-                String payload = line.substring(5).trim();
-                if ("[DONE]".equals(payload)) {
-                    break;
-                }
-                JSONObject chunk = new JSONObject(payload);
-                JSONArray choices = chunk.optJSONArray("choices");
-                if (choices == null || choices.length() == 0) {
-                    continue;
-                }
-                JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
-                if (delta == null) {
-                    continue;
-                }
-                JSONObject audioObj = delta.optJSONObject("audio");
-                if (audioObj != null && audioObj.has("data")) {
-                    byte[] decoded = Base64.decode(audioObj.getString("data"), Base64.DEFAULT);
-                    pcmOut.write(decoded);
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) {
+                throw new IOException("HTTP " + code + ": " + readError(conn));
+            }
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null && !cancelled) {
+                    if (!line.startsWith("data:")) {
+                        continue;
+                    }
+                    String payload = line.substring(5).trim();
+                    if ("[DONE]".equals(payload)) {
+                        break;
+                    }
+                    JSONObject chunk = new JSONObject(payload);
+                    JSONArray choices = chunk.optJSONArray("choices");
+                    if (choices == null || choices.length() == 0) {
+                        continue;
+                    }
+                    JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
+                    if (delta == null) {
+                        continue;
+                    }
+                    JSONObject audioObj = delta.optJSONObject("audio");
+                    if (audioObj != null && audioObj.has("data")) {
+                        pcmOut.write(Base64.decode(audioObj.getString("data"), Base64.DEFAULT));
+                    }
                 }
             }
         } finally {
-            activeCall.compareAndSet(call, null);
+            activeConn.compareAndSet(conn, null);
+            conn.disconnect();
         }
         return pcm16MonoToWav(pcmOut.toByteArray(), 24000);
     }
@@ -299,13 +297,11 @@ public class CloudAiTtsEngine implements h {
                         .put("text", text)
                         .put("operation", "query"));
 
-        Request request = new Request.Builder()
-                .url(url)
-                .addHeader("Authorization", "Bearer;" + config.apiKey)
-                .post(RequestBody.create(body.toString(), JSON_MEDIA))
-                .build();
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Authorization", "Bearer;" + config.apiKey);
+        headers.put("Content-Type", "application/json; charset=utf-8");
 
-        String jsonStr = new String(executeBytes(request), StandardCharsets.UTF_8);
+        String jsonStr = new String(executeBytes("POST", url, headers, body.toString().getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8);
         JSONObject resp = new JSONObject(jsonStr);
         int code = resp.optInt("code", -1);
         if (code != 0 && code != 3000) {
@@ -314,56 +310,91 @@ public class CloudAiTtsEngine implements h {
         return Base64.decode(resp.getString("data"), Base64.DEFAULT);
     }
 
-    private byte[] callAzure(float speed, float pitch, String text) throws Exception {
+    private byte[] callAzure(float speed, String text) throws Exception {
         String url = config.effectiveBaseUrl() + "/cognitiveservices/v1";
         String ratePct = Math.round((speed - 1.0f) * 100) + "%";
         String ssml = "<speak version='1.0' xml:lang='zh-CN'><voice name='" + config.voice + "'>"
                 + "<prosody rate='" + ratePct + "'>" + escapeXml(text) + "</prosody></voice></speak>";
 
-        Request request = new Request.Builder()
-                .url(url)
-                .addHeader("Ocp-Apim-Subscription-Key", config.apiKey)
-                .addHeader("X-Microsoft-OutputFormat", "riff-24khz-16bit-mono-pcm")
-                .post(RequestBody.create(ssml, SSML_MEDIA))
-                .build();
-        return executeBytes(request);
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Ocp-Apim-Subscription-Key", config.apiKey);
+        headers.put("X-Microsoft-OutputFormat", "riff-24khz-16bit-mono-pcm");
+        headers.put("Content-Type", "application/ssml+xml; charset=utf-8");
+        return executeBytes("POST", url, headers, ssml.getBytes(StandardCharsets.UTF_8));
     }
 
     private byte[] callAlibabaDashScope(float speed, String text) throws Exception {
         String url = config.effectiveBaseUrl() + "/services/aigc/multimodal-generation/generation";
-        JSONObject input = new JSONObject()
-                .put("text", text)
-                .put("voice", config.voice);
-        JSONObject params = new JSONObject()
-                .put("speed", Math.max(0.5f, Math.min(2.0f, speed)));
         JSONObject body = new JSONObject()
                 .put("model", config.model)
-                .put("input", input)
-                .put("parameters", params);
+                .put("input", new JSONObject().put("text", text).put("voice", config.voice))
+                .put("parameters", new JSONObject().put("speed", Math.max(0.5f, Math.min(2.0f, speed))));
 
-        Request request = new Request.Builder()
-                .url(url)
-                .addHeader("Authorization", "Bearer " + config.apiKey)
-                .post(RequestBody.create(body.toString(), JSON_MEDIA))
-                .build();
-        String jsonStr = new String(executeBytes(request), StandardCharsets.UTF_8);
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Authorization", "Bearer " + config.apiKey);
+        headers.put("Content-Type", "application/json; charset=utf-8");
+
+        String jsonStr = new String(executeBytes("POST", url, headers, body.toString().getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8);
         JSONObject resp = new JSONObject(jsonStr);
         String audioUrl = resp.getJSONObject("output").getJSONObject("audio").getString("url");
-        return executeBytes(new Request.Builder().url(audioUrl).get().build());
+        return executeBytes("GET", audioUrl, new HashMap<>(), null);
     }
 
-    private byte[] executeBytes(Request request) throws IOException {
-        Call call = SHARED_CLIENT.newCall(request);
-        activeCall.set(call);
-        try (Response response = call.execute()) {
-            ResponseBody respBody = response.body();
-            if (!response.isSuccessful() || respBody == null) {
-                String err = respBody != null ? respBody.string() : response.message();
-                throw new IOException("HTTP " + response.code() + ": " + err);
+    private HttpURLConnection openConnection(String method, String urlStr) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+        conn.setRequestMethod(method);
+        conn.setConnectTimeout(20000);
+        conn.setReadTimeout(120000);
+        if ("POST".equals(method)) {
+            conn.setDoOutput(true);
+        }
+        return conn;
+    }
+
+    private byte[] executeBytes(String method, String urlStr, Map<String, String> headers, byte[] body) throws IOException {
+        HttpURLConnection conn = openConnection(method, urlStr);
+        for (Map.Entry<String, String> e : headers.entrySet()) {
+            conn.setRequestProperty(e.getKey(), e.getValue());
+        }
+        activeConn.set(conn);
+        try {
+            if (body != null) {
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(body);
+                }
             }
-            return respBody.bytes();
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) {
+                throw new IOException("HTTP " + code + ": " + readError(conn));
+            }
+            try (InputStream is = conn.getInputStream()) {
+                return readAllBytes(is);
+            }
         } finally {
-            activeCall.compareAndSet(call, null);
+            activeConn.compareAndSet(conn, null);
+            conn.disconnect();
+        }
+    }
+
+    private static byte[] readAllBytes(InputStream is) throws IOException {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = is.read(buf)) != -1) {
+            bos.write(buf, 0, n);
+        }
+        return bos.toByteArray();
+    }
+
+    private static String readError(HttpURLConnection conn) {
+        try {
+            InputStream err = conn.getErrorStream();
+            if (err == null) {
+                return conn.getResponseMessage();
+            }
+            return new String(readAllBytes(err), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return "";
         }
     }
 
@@ -394,10 +425,6 @@ public class CloudAiTtsEngine implements h {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
-    /**
-     * 桥接 MultiTTS 的 R6.g (p020c2.a) 回调：
-     * 实际挂钩时，请对照反编译后的 p020c2.a 音频写入方法名替换或补全此桥接。
-     */
     private static void deliverAudioOrError(g callback, byte[] wavBytes, String errorMsg) {
         if (callback == null) {
             return;
@@ -406,6 +433,6 @@ public class CloudAiTtsEngine implements h {
             ((p020c2.a) callback).u(errorMsg);
             return;
         }
-        // TODO: 将 wavBytes (或剥离 44 字节头后的 PCM) 传给 p020c2.a 的音频数据写入方法
+        // TODO: 将 wavBytes 传给 p020c2.a 音频写入方法
     }
 }
