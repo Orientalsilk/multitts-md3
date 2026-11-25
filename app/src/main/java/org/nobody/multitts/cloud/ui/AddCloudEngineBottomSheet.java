@@ -81,9 +81,9 @@ public final class AddCloudEngineBottomSheet {
             etModel.setText(config.providerType.defaultModel);
         });
 
-MaterialButton btnTest = new MaterialButton(activity);
-btnTest.setBackgroundColor(Color.parseColor("#DCE6CF"));
-btnTest.setTextColor(Color.parseColor("#2A3B17"));
+        MaterialButton btnTest = new MaterialButton(activity);
+        btnTest.setBackgroundColor(Color.parseColor("#DCE6CF"));
+        btnTest.setTextColor(Color.parseColor("#2A3B17"));
         btnTest.setText("连接测试");
         container.addView(btnTest, lpMarginTop(activity, 14));
 

@@ -27,10 +27,8 @@ android {
 }
 
 dependencies {
-    implementation 'androidx.appcompat:appcompat:1.7.0'
-    implementation 'com.google.android.material:material:1.12.0'
-    implementation 'androidx.recyclerview:recyclerview:1.3.2'
-    implementation 'androidx.coordinatorlayout:coordinatorlayout:1.2.0'
-    // MultiTTS 原包已内置 OkHttp3，用 compileOnly 避免重复打入 DEX
+    // 全部使用 compileOnly：只编译 org.nobody.multitts.cloud.*，不把重复的 androidx/material 类和错误 R ID 打进 DEX
+    compileOnly 'androidx.appcompat:appcompat:1.7.0'
+    compileOnly 'com.google.android.material:material:1.12.0'
     compileOnly 'com.squareup.okhttp3:okhttp:4.12.0'
 }
