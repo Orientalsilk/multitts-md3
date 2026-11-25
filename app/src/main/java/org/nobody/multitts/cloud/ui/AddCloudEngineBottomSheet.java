@@ -333,7 +333,6 @@ public class AddCloudEngineBottomSheet {
             target.url = config.effectiveBaseUrl();
             target.param = config.toParamJson();
             target.header = "";
-            target.sort = existing != null ? existing.sort : 0;
 
             saveEngineViaReflection(activity, target, existing != null);
             Toast.makeText(activity, "已保存云引擎：" + target.name, Toast.LENGTH_SHORT).show();
