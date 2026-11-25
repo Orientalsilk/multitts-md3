@@ -4,87 +4,100 @@ import android.text.TextUtils;
 import org.json.JSONObject;
 import org.nobody.multitts.tts.engine.Engine;
 
-/**
- * 存储在 Engine.param 中的云端 AI TTS 配置模型。
- */
 public class CloudTtsConfig {
+
     public CloudTtsProviderType providerType = CloudTtsProviderType.OPENAI;
     public String name = "";
     public String baseUrl = "";
     public String apiKey = "";
-    public String appId = ""; // Volcengine 等需要 AppId
-    public String model = "";
-    public String voice = "";
+    public String secretKey = "";
+    public String region = "";
+    public String appId = "";
+    public String model = CloudTtsProviderType.OPENAI.defaultModel;
+    public String voice = CloudTtsProviderType.OPENAI.defaultVoice;
     public String style = "";
     public String instructions = "";
-    public int maxConcurrency = 3;
+    public String referenceAudioBase64 = "";
+    public String referenceAudioName = "";
+    public int maxConcurrency = 2;
     public int timeoutSeconds = 60;
 
+    public String effectiveBaseUrl() {
+        String raw = !TextUtils.isEmpty(baseUrl) ? baseUrl.trim() : providerType.defaultBaseUrl;
+        while (raw.endsWith("/")) {
+            raw = raw.substring(0, raw.length() - 1);
+        }
+        return raw;
+    }
+
     public static CloudTtsConfig fromEngine(Engine engine) {
-        CloudTtsConfig config = new CloudTtsConfig();
+        CloudTtsConfig cfg = new CloudTtsConfig();
         if (engine == null) {
-            return config;
+            return cfg;
         }
         CloudTtsProviderType matched = CloudTtsProviderType.fromEngineType(engine.type);
         if (matched != null) {
-            config.providerType = matched;
+            cfg.providerType = matched;
+            cfg.model = matched.defaultModel;
+            cfg.voice = matched.defaultVoice;
         }
-        config.name = engine.name != null ? engine.name : config.providerType.displayName;
-        config.baseUrl = !TextUtils.isEmpty(engine.url) ? engine.url.trim() : config.providerType.defaultBaseUrl;
-        config.model = config.providerType.defaultModel;
-        config.voice = config.providerType.defaultVoice;
-
+        if (!TextUtils.isEmpty(engine.name)) {
+            cfg.name = engine.name;
+        }
+        if (!TextUtils.isEmpty(engine.url)) {
+            cfg.baseUrl = engine.url;
+        }
         if (!TextUtils.isEmpty(engine.param)) {
             try {
                 JSONObject json = new JSONObject(engine.param);
                 String pType = json.optString("providerType", "");
-                if (!TextUtils.isEmpty(pType)) {
-                    CloudTtsProviderType parsed = CloudTtsProviderType.fromEngineType(pType);
-                    if (parsed != null) {
-                        config.providerType = parsed;
-                    }
+                CloudTtsProviderType pMatched = CloudTtsProviderType.fromEngineType(pType);
+                if (pMatched != null) {
+                    cfg.providerType = pMatched;
                 }
-                if (json.has("baseUrl") && !TextUtils.isEmpty(json.optString("baseUrl"))) {
-                    config.baseUrl = json.optString("baseUrl").trim();
+                if (json.has("baseUrl") && TextUtils.isEmpty(cfg.baseUrl)) {
+                    cfg.baseUrl = json.optString("baseUrl", "");
                 }
-                config.apiKey = json.optString("apiKey", "");
-                config.appId = json.optString("appId", "");
-                config.model = json.optString("model", config.providerType.defaultModel);
-                config.voice = json.optString("voice", config.providerType.defaultVoice);
-                config.style = json.optString("style", "");
-                config.instructions = json.optString("instructions", "");
-                config.maxConcurrency = Math.max(1, Math.min(8, json.optInt("maxConcurrency", 3)));
-                config.timeoutSeconds = Math.max(10, Math.min(180, json.optInt("timeoutSeconds", 60)));
-            } catch (Exception ignored) {
+                cfg.apiKey = json.optString("apiKey", "");
+                cfg.secretKey = json.optString("secretKey", "");
+                cfg.region = json.optString("region", "");
+                cfg.appId = json.optString("appId", "");
+                String m = json.optString("model", "");
+                cfg.model = !TextUtils.isEmpty(m) ? m : cfg.providerType.defaultModel;
+                String v = json.optString("voice", "");
+                cfg.voice = !TextUtils.isEmpty(v) ? v : cfg.providerType.defaultVoice;
+                cfg.style = json.optString("style", "");
+                cfg.instructions = json.optString("instructions", "");
+                cfg.referenceAudioBase64 = json.optString("referenceAudioBase64", "");
+                cfg.referenceAudioName = json.optString("referenceAudioName", "");
+                cfg.maxConcurrency = json.optInt("maxConcurrency", 2);
+                cfg.timeoutSeconds = json.optInt("timeoutSeconds", 60);
+            } catch (Throwable ignored) {
             }
         }
-        return config;
+        return cfg;
     }
 
     public String toParamJson() {
         try {
             JSONObject json = new JSONObject();
             json.put("providerType", providerType.engineType);
-            json.put("baseUrl", baseUrl);
-            json.put("apiKey", apiKey);
-            json.put("appId", appId);
-            json.put("model", model);
-            json.put("voice", voice);
-            json.put("style", style);
-            json.put("instructions", instructions);
+            json.put("baseUrl", baseUrl != null ? baseUrl : "");
+            json.put("apiKey", apiKey != null ? apiKey : "");
+            json.put("secretKey", secretKey != null ? secretKey : "");
+            json.put("region", region != null ? region : "");
+            json.put("appId", appId != null ? appId : "");
+            json.put("model", model != null ? model : "");
+            json.put("voice", voice != null ? voice : "");
+            json.put("style", style != null ? style : "");
+            json.put("instructions", instructions != null ? instructions : "");
+            json.put("referenceAudioBase64", referenceAudioBase64 != null ? referenceAudioBase64 : "");
+            json.put("referenceAudioName", referenceAudioName != null ? referenceAudioName : "");
             json.put("maxConcurrency", maxConcurrency);
             json.put("timeoutSeconds", timeoutSeconds);
             return json.toString();
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return "{}";
         }
-    }
-
-    public String effectiveBaseUrl() {
-        String url = TextUtils.isEmpty(baseUrl) ? providerType.defaultBaseUrl : baseUrl.trim();
-        while (url.endsWith("/")) {
-            url = url.substring(0, url.length() - 1);
-        }
-        return url;
     }
 }
