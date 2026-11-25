@@ -26,6 +26,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import org.nobody.multitts.cloud.CloudAiTtsEngine;
 import org.nobody.multitts.cloud.CloudTtsConfig;
@@ -419,8 +421,9 @@ public class AddCloudEngineBottomSheet {
             target.header = "";
 
             saveEngineViaReflection(activity, target);
-            if (ensureDefaultSpeakerViaReflection(activity, target, config)) {
-                Toast.makeText(activity, "已保存云引擎并生成音色：" + target.name, Toast.LENGTH_SHORT).show();
+            int speakerCount = ensureDefaultSpeakerViaReflection(activity, target, config);
+            if (speakerCount > 0) {
+                Toast.makeText(activity, "已保存云引擎并生成音色（" + target.name + "，共 " + speakerCount + " 个）", Toast.LENGTH_SHORT).show();
             }
             if (listener != null) {
                 listener.onSaved(target);
@@ -476,7 +479,8 @@ public class AddCloudEngineBottomSheet {
         }
     }
 
-    private static boolean ensureDefaultSpeakerViaReflection(Activity activity, Engine target, CloudTtsConfig config) {
+    @SuppressWarnings("unchecked")
+    private static int ensureDefaultSpeakerViaReflection(Activity activity, Engine target, CloudTtsConfig config) {
         try {
             Speaker sp = new Speaker();
             sp.code = target.code;
@@ -510,7 +514,26 @@ public class AddCloudEngineBottomSheet {
                 sp.id = "sp_" + target.code;
             }
 
-            qc.getMethod("Y", Speaker.class).invoke(null, sp);
+            List<Speaker> list = new ArrayList<>();
+            try {
+                Object existingList = qc.getMethod("z", String.class).invoke(null, target.code);
+                if (existingList instanceof List<?>) {
+                    for (Object o : (List<?>) existingList) {
+                        if (o instanceof Speaker) {
+                            Speaker oldSp = (Speaker) o;
+                            if (!sp.id.equals(oldSp.id)) {
+                                list.add(oldSp);
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+            list.add(sp);
+
+            // Q6.c.a0 会先清理该 group 旧数据再执行 Room @Insert 插入整组音色并触发 Q6.c.Z()
+            qc.getMethod("a0", String.class, List.class).invoke(null, target.code, list);
+
             try {
                 Class.forName("K6.d").getMethod("i", android.content.Context.class)
                         .invoke(null, activity.getApplicationContext());
@@ -521,15 +544,17 @@ public class AddCloudEngineBottomSheet {
                         .invoke(null, activity.getApplicationContext());
             } catch (Throwable ignored) {
             }
-            try {
-                qc.getMethod("Z").invoke(null);
-            } catch (Throwable ignored) {
+
+            Object verified = qc.getMethod("z", String.class).invoke(null, target.code);
+            int count = (verified instanceof List<?>) ? ((List<?>) verified).size() : list.size();
+            if (count <= 0) {
+                Toast.makeText(activity, "音色未写入数据库，请检查日志", Toast.LENGTH_LONG).show();
             }
-            return true;
+            return count;
         } catch (Throwable t) {
             Throwable cause = t.getCause() != null ? t.getCause() : t;
             Toast.makeText(activity, "音色生成失败：" + cause.getMessage(), Toast.LENGTH_LONG).show();
-            return false;
+            return 0;
         }
     }
 
