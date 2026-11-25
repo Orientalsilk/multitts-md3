@@ -423,7 +423,7 @@ public class AddCloudEngineBottomSheet {
             saveEngineViaReflection(activity, target);
             int speakerCount = ensureDefaultSpeakerViaReflection(activity, target, config);
             try {
-                Class.forName("K6.d").getMethod("i", android.content.Context.class).invoke(null, activity.getApplicationContext());
+                Class.forName("Q6.c").getMethod("Z").invoke(null);
             } catch (Throwable ignored) {}
             try {
                 Class.forName("Z6.o").getMethod("d").invoke(null);
@@ -545,17 +545,6 @@ public class AddCloudEngineBottomSheet {
             // Q6.c.a0 会先清理该 group 旧数据再执行 Room @Insert 插入整组音色并触发 Q6.c.Z()
             qc.getMethod("a0", String.class, List.class).invoke(null, target.code, list);
 
-            try {
-                Class.forName("K6.d").getMethod("i", android.content.Context.class)
-                        .invoke(null, activity.getApplicationContext());
-            } catch (Throwable ignored) {
-            }
-            try {
-                qc.getMethod("K", android.content.Context.class)
-                        .invoke(null, activity.getApplicationContext());
-            } catch (Throwable ignored) {
-            }
-
             Object verified = qc.getMethod("z", String.class).invoke(null, target.code);
             int count = (verified instanceof List<?>) ? ((List<?>) verified).size() : list.size();
             if (count <= 0) {
@@ -647,11 +636,10 @@ public class AddCloudEngineBottomSheet {
                     }
                 }
                 Speaker sp = existingSp != null ? existingSp : new Speaker();
-                if (TextUtils.isEmpty(sp.id)) {
-                    sp.id = engine.code + "_" + UUID.randomUUID().toString().substring(0, 6);
-                }
-                sp.code = sp.id;
                 sp.group = engine.code;
+                if (TextUtils.isEmpty(sp.code)) {
+                    sp.code = engine.code + "_" + UUID.randomUUID().toString().substring(0, 6);
+                }
                 sp.name = vName;
                 sp.param = vId;
                 sp.locale = "zh-CN";
@@ -664,6 +652,17 @@ public class AddCloudEngineBottomSheet {
                 sp.speed = 1.0f;
                 sp.pitch = 1.0f;
                 sp.volume = 1.0f;
+                if (TextUtils.isEmpty(sp.id)) {
+                    try {
+                        Object computedId = qc.getMethod("B", Speaker.class).invoke(null, sp);
+                        if (computedId instanceof String && !TextUtils.isEmpty((String) computedId)) {
+                            sp.id = (String) computedId;
+                        }
+                    } catch (Throwable ignored) {}
+                    if (TextUtils.isEmpty(sp.id)) {
+                        sp.id = sp.code;
+                    }
+                }
 
                 boolean replaced = false;
                 for (int i = 0; i < list.size(); i++) {
@@ -679,10 +678,7 @@ public class AddCloudEngineBottomSheet {
 
                 qc.getMethod("a0", String.class, List.class).invoke(null, engine.code, list);
                 try {
-                    Class.forName("K6.d").getMethod("i", android.content.Context.class).invoke(null, activity.getApplicationContext());
-                } catch (Throwable ignored) {}
-                try {
-                    qc.getMethod("K", android.content.Context.class).invoke(null, activity.getApplicationContext());
+                    qc.getMethod("Z").invoke(null);
                 } catch (Throwable ignored) {}
                 try {
                     Class.forName("Z6.o").getMethod("d").invoke(null);
@@ -690,7 +686,9 @@ public class AddCloudEngineBottomSheet {
                 try {
                     Class.forName("R6.i").getMethod("e").invoke(null);
                 } catch (Throwable ignored) {}
-                Toast.makeText(activity, "已保存音色：" + vName + "（当前引擎共 " + list.size() + " 个）", Toast.LENGTH_SHORT).show();
+                Object verified = qc.getMethod("z", String.class).invoke(null, engine.code);
+                int realCount = (verified instanceof List<?>) ? ((List<?>) verified).size() : list.size();
+                Toast.makeText(activity, "已保存音色：" + vName + "（数据库共 " + realCount + " 个）", Toast.LENGTH_SHORT).show();
                 if (onSaved != null) {
                     onSaved.run();
                 }

@@ -173,7 +173,7 @@ public class CloudEngineActivity extends Activity {
     @SuppressWarnings("unchecked")
     private void reloadVoices() {
         listContainer.removeAllViews();
-        addHint("重启 MultiTTS 后，主界面顶部引擎标签栏最右侧也会显示以下云端音色分组。");
+        addHint("点引擎右侧「+ 添加音色」可为同一引擎挂载多个音色；回到主界面下拉列表或重启即可同步顶栏分页。");
         List<Engine> all = loadEnginesViaReflection();
         int totalSpeakers = 0;
         for (Engine e : all) {
@@ -392,6 +392,7 @@ public class CloudEngineActivity extends Activity {
                 }
             }
             qc.getMethod("a0", String.class, List.class).invoke(null, engine.code, list);
+            try { qc.getMethod("Z").invoke(null); } catch (Throwable ignored) {}
             try { Class.forName("Z6.o").getMethod("d").invoke(null); } catch (Throwable ignored) {}
             try { Class.forName("R6.i").getMethod("e").invoke(null); } catch (Throwable ignored) {}
             Toast.makeText(this, "已删除音色：" + targetSp.name, Toast.LENGTH_SHORT).show();
