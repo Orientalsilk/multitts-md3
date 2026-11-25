@@ -7,7 +7,7 @@ public enum CloudTtsProviderType {
     OPENAI("cloud_openai", "OpenAI Speech", "https://api.openai.com/v1", "gpt-4o-mini-tts", "alloy", true),
     GEMINI("cloud_gemini", "Google Gemini TTS", "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash-preview-tts", "Kore", true),
     MIMO("cloud_mimo", "Xiaomi MiMo", "https://api.xiaomimimo.com/v1", "mimo-v2.5-tts", "mimo_default", false),
-    FISHAUDIO("cloud_fishaudio", "Fish Audio", "https://api.fish.audio/v1", "s1", "", false),
+    FISHAUDIO("cloud_fishaudio", "Fish Audio", "https://api.fish.audio/v1", "s2.1-pro-free", "", false),
     AZURE("cloud_azure", "Microsoft Azure Speech", "https://eastasia.tts.speech.microsoft.com", "neural", "zh-CN-XiaoxiaoNeural", false),
     ALIBABA("cloud_dashscope", "Alibaba Cloud Model Studio", "https://dashscope.aliyuncs.com/api/v1", "qwen3-tts-flash", "Cherry", true),
     POLLY("cloud_polly", "Amazon Polly", "https://polly.us-east-1.amazonaws.com", "neural", "Zhiyu", false),
