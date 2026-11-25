@@ -182,7 +182,7 @@ public class CloudEngineActivity extends Activity {
             }
             List<Speaker> speakers = loadSpeakersForGroupViaReflection(e.code);
             CloudTtsProviderType pt = CloudTtsProviderType.fromEngineType(e.type);
-            addHeader((!TextUtils.isEmpty(e.name) ? e.name : e.code)
+            addVoiceGroupHeader(e, (!TextUtils.isEmpty(e.name) ? e.name : e.code)
                     + " · " + (pt != null ? pt.displayName : e.type));
             if (speakers.isEmpty()) {
                 addHint("暂无音色，请切回「引擎」标签点 ✎ 重新保存一次即可生成");
@@ -236,6 +236,25 @@ public class CloudEngineActivity extends Activity {
         playBtn.setPadding(dp(12), dp(6), dp(12), dp(6));
         playBtn.setOnClickListener(v -> auditionSpeaker(engine, sp, playBtn));
         card.addView(playBtn);
+
+        TextView editSpBtn = new TextView(this);
+        editSpBtn.setText("✎");
+        editSpBtn.setTextSize(17);
+        editSpBtn.setTextColor(Color.parseColor("#3E4239"));
+        editSpBtn.setPadding(dp(10), dp(6), dp(6), dp(6));
+        editSpBtn.setOnClickListener(v -> AddCloudEngineBottomSheet.showSpeakerDialog(this, engine, sp, this::reloadVoices));
+        card.addView(editSpBtn);
+
+        TextView delSpBtn = new TextView(this);
+        delSpBtn.setText("🗑");
+        delSpBtn.setTextSize(16);
+        delSpBtn.setTextColor(Color.parseColor("#3E4239"));
+        delSpBtn.setPadding(dp(6), dp(6), dp(4), dp(6));
+        delSpBtn.setOnClickListener(v -> {
+            deleteSingleSpeakerViaReflection(engine, sp);
+            reloadVoices();
+        });
+        card.addView(delSpBtn);
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -326,6 +345,58 @@ public class CloudEngineActivity extends Activity {
             for (Engine e : httpList) {
                 addEngineCard(e, "HTTP TTS");
             }
+        }
+    }
+
+    private void addVoiceGroupHeader(final Engine engine, String titleText) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(4), dp(14), dp(4), dp(6));
+
+        TextView tv = new TextView(this);
+        tv.setText(titleText);
+        tv.setTextSize(13);
+        tv.setTextColor(Color.parseColor("#5C6057"));
+        row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView addBtn = new TextView(this);
+        addBtn.setText("+ 添加音色");
+        addBtn.setTextSize(12);
+        addBtn.setTextColor(Color.parseColor("#2A3B17"));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.parseColor("#DCE6CF"));
+        bg.setCornerRadius(dp(10));
+        addBtn.setBackground(bg);
+        addBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
+        addBtn.setOnClickListener(v -> AddCloudEngineBottomSheet.showSpeakerDialog(this, engine, null, this::reloadVoices));
+        row.addView(addBtn);
+
+        listContainer.addView(row);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void deleteSingleSpeakerViaReflection(Engine engine, Speaker targetSp) {
+        try {
+            Class<?> qc = Class.forName("Q6.c");
+            List<Speaker> list = new ArrayList<>();
+            Object existingList = qc.getMethod("z", String.class).invoke(null, engine.code);
+            if (existingList instanceof List<?>) {
+                for (Object o : (List<?>) existingList) {
+                    if (o instanceof Speaker) {
+                        Speaker s = (Speaker) o;
+                        if (!targetSp.id.equals(s.id)) {
+                            list.add(s);
+                        }
+                    }
+                }
+            }
+            qc.getMethod("a0", String.class, List.class).invoke(null, engine.code, list);
+            try { Class.forName("Z6.o").getMethod("d").invoke(null); } catch (Throwable ignored) {}
+            try { Class.forName("R6.i").getMethod("e").invoke(null); } catch (Throwable ignored) {}
+            Toast.makeText(this, "已删除音色：" + targetSp.name, Toast.LENGTH_SHORT).show();
+        } catch (Throwable t) {
+            Toast.makeText(this, "删除音色失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 

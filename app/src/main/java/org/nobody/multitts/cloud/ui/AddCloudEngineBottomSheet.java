@@ -569,6 +569,150 @@ public class AddCloudEngineBottomSheet {
         }
     }
 
+
+    public static void showSpeakerDialog(Activity activity, Engine engine, Speaker existingSp, Runnable onSaved) {
+        if (engine == null) {
+            return;
+        }
+        CloudTtsConfig cfg = CloudTtsConfig.fromEngine(engine);
+        Dialog dialog = new Dialog(activity);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(activity);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.parseColor("#F6F7F2"));
+        root.setPadding(dp(activity, 20), dp(activity, 14), dp(activity, 20), dp(activity, 24));
+
+        View handle = new View(activity);
+        GradientDrawable handleBg = new GradientDrawable();
+        handleBg.setColor(Color.parseColor("#C2C7BA"));
+        handleBg.setCornerRadius(dp(activity, 2));
+        handle.setBackground(handleBg);
+        LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(activity, 36), dp(activity, 4));
+        handleLp.gravity = Gravity.CENTER_HORIZONTAL;
+        handleLp.bottomMargin = dp(activity, 14);
+        root.addView(handle, handleLp);
+
+        TextView title = new TextView(activity);
+        title.setText((existingSp == null ? "添加音色 · " : "编辑音色 · ") + engine.name);
+        title.setTextSize(19);
+        title.setTextColor(Color.parseColor("#1B1C18"));
+        title.setPadding(0, 0, 0, dp(activity, 12));
+        root.addView(title);
+
+        String initName = existingSp != null && !TextUtils.isEmpty(existingSp.name) ? existingSp.name : "";
+        String initVoice = existingSp != null && !TextUtils.isEmpty(existingSp.param) ? existingSp.param : cfg.voice;
+        EditText spNameEdit = addInput(activity, root, "音色显示名称（如：旁白男声 / 御姐音）", initName, false);
+        EditText spVoiceEdit = addInput(activity, root, "Voice ID / Fish Audio reference_id", initVoice, false);
+
+        String[] presets = presetVoicesFor(cfg.providerType);
+        if (presets.length > 0) {
+            Button quickBtn = makePillButton(activity, "快捷选择预设音色", "#EAECE4", "#2A3B17");
+            root.addView(quickBtn, lpMarginTop(activity, 8));
+            quickBtn.setOnClickListener(v -> {
+                PopupMenu pm = new PopupMenu(activity, quickBtn);
+                for (int i = 0; i < presets.length; i++) {
+                    pm.getMenu().add(0, i, i, presets[i]);
+                }
+                pm.setOnMenuItemClickListener(item -> {
+                    String chosen = presets[item.getItemId()];
+                    spVoiceEdit.setText(chosen);
+                    if (TextUtils.isEmpty(spNameEdit.getText().toString().trim())) {
+                        spNameEdit.setText(chosen);
+                    }
+                    return true;
+                });
+                pm.show();
+            });
+        }
+
+        Button saveBtn = makePillButton(activity, "保存音色", "#4B662C", "#FFFFFF");
+        root.addView(saveBtn, lpMarginTop(activity, 16));
+
+        saveBtn.setOnClickListener(v -> {
+            String vName = spNameEdit.getText().toString().trim();
+            String vId = spVoiceEdit.getText().toString().trim();
+            if (TextUtils.isEmpty(vName)) {
+                vName = !TextUtils.isEmpty(vId) ? vId : engine.name;
+            }
+            try {
+                Class<?> qc = Class.forName("Q6.c");
+                List<Speaker> list = new ArrayList<>();
+                Object existingList = qc.getMethod("z", String.class).invoke(null, engine.code);
+                if (existingList instanceof List<?>) {
+                    for (Object o : (List<?>) existingList) {
+                        if (o instanceof Speaker) {
+                            list.add((Speaker) o);
+                        }
+                    }
+                }
+                Speaker sp = existingSp != null ? existingSp : new Speaker();
+                if (TextUtils.isEmpty(sp.id)) {
+                    sp.id = engine.code + "_" + UUID.randomUUID().toString().substring(0, 6);
+                }
+                sp.code = sp.id;
+                sp.group = engine.code;
+                sp.name = vName;
+                sp.param = vId;
+                sp.locale = "zh-CN";
+                if (sp.desc == null) sp.desc = "";
+                if (sp.note == null) sp.note = "";
+                if (sp.extendUI == null) sp.extendUI = "";
+                if (sp.avatar == null) sp.avatar = "";
+                sp.sampleRate = 24000;
+                sp.type = 1;
+                sp.speed = 1.0f;
+                sp.pitch = 1.0f;
+                sp.volume = 1.0f;
+
+                boolean replaced = false;
+                for (int i = 0; i < list.size(); i++) {
+                    if (sp.id.equals(list.get(i).id)) {
+                        list.set(i, sp);
+                        replaced = true;
+                        break;
+                    }
+                }
+                if (!replaced) {
+                    list.add(sp);
+                }
+
+                qc.getMethod("a0", String.class, List.class).invoke(null, engine.code, list);
+                try {
+                    Class.forName("K6.d").getMethod("i", android.content.Context.class).invoke(null, activity.getApplicationContext());
+                } catch (Throwable ignored) {}
+                try {
+                    qc.getMethod("K", android.content.Context.class).invoke(null, activity.getApplicationContext());
+                } catch (Throwable ignored) {}
+                try {
+                    Class.forName("Z6.o").getMethod("d").invoke(null);
+                } catch (Throwable ignored) {}
+                try {
+                    Class.forName("R6.i").getMethod("e").invoke(null);
+                } catch (Throwable ignored) {}
+                Toast.makeText(activity, "已保存音色：" + vName + "（当前引擎共 " + list.size() + " 个）", Toast.LENGTH_SHORT).show();
+                if (onSaved != null) {
+                    onSaved.run();
+                }
+                dialog.dismiss();
+            } catch (Throwable t) {
+                Throwable cause = t.getCause() != null ? t.getCause() : t;
+                Toast.makeText(activity, "保存音色失败：" + cause.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
+
+        ScrollView scroll = new ScrollView(activity);
+        scroll.addView(root);
+        dialog.setContentView(scroll);
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            win.setGravity(Gravity.BOTTOM);
+            win.setBackgroundDrawable(roundedBox(activity, "#F6F7F2"));
+        }
+        dialog.show();
+    }
+
     private static EditText addInput(Activity activity, LinearLayout parent, String label, String val, boolean password) {
         LinearLayout wrap = new LinearLayout(activity);
         wrap.setOrientation(LinearLayout.VERTICAL);
