@@ -2,36 +2,50 @@ package org.nobody.multitts.cloud.ui;
 
 import android.app.Activity;
 import android.app.Dialog;
+import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
-import android.graphics.Typeface;
-import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.text.InputType;
-import android.util.TypedValue;
+import android.text.TextUtils;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
-import android.view.WindowManager;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
-import java.util.concurrent.Executors;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.lang.ref.WeakReference;
+import java.lang.reflect.Method;
+import java.util.UUID;
 import org.nobody.multitts.cloud.CloudAiTtsEngine;
 import org.nobody.multitts.cloud.CloudTtsConfig;
 import org.nobody.multitts.cloud.CloudTtsProviderType;
 import org.nobody.multitts.tts.engine.Engine;
 
-/**
- * 纯原生 Dialog 实现的 Legado MD3 风格底部弹窗（零 XML / 零 Material R.attr 依赖）。
- */
-public final class AddCloudEngineBottomSheet {
+public class AddCloudEngineBottomSheet {
+
+    public static final int REQ_PICK_MIMO_AUDIO = 9527;
+    private static final int MAX_STORED_DATA_URL_LENGTH = 1_500_000;
+    private static final String[] MIMO_MODELS = new String[] {
+            "mimo-v2.5-tts",
+            "mimo-v2.5-tts-voicedesign",
+            "mimo-v2.5-tts-voiceclone"
+    };
+
+    private static WeakReference<CloudTtsConfig> activeConfigRef = new WeakReference<>(null);
+    private static WeakReference<Button> activePickAudioBtnRef = new WeakReference<>(null);
+    private static WeakReference<Button> activeClearAudioBtnRef = new WeakReference<>(null);
+    private static WeakReference<TextView> activeStatusTvRef = new WeakReference<>(null);
 
     public interface OnSavedListener {
         void onSaved(Engine engine);
@@ -40,218 +54,386 @@ public final class AddCloudEngineBottomSheet {
     private AddCloudEngineBottomSheet() {
     }
 
-    public static void show(Activity activity, Engine targetEngine, OnSavedListener listener) {
-        CloudTtsConfig config = CloudTtsConfig.fromEngine(targetEngine);
+    public static void handleActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
+        if (requestCode != REQ_PICK_MIMO_AUDIO || resultCode != Activity.RESULT_OK || data == null) {
+            return;
+        }
+        Uri uri = data.getData();
+        CloudTtsConfig cfg = activeConfigRef.get();
+        if (uri == null || cfg == null) {
+            return;
+        }
+        try {
+            String fileName = queryDisplayName(activity, uri);
+            String mime = resolveAudioMime(activity, uri, fileName);
+            String prefix = "data:" + mime + ";base64,";
+            int maxRawBytes = ((MAX_STORED_DATA_URL_LENGTH - prefix.length()) / 4) * 3;
+
+            byte[] bytes;
+            try (InputStream is = activity.getContentResolver().openInputStream(uri);
+                 ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+                if (is == null) {
+                    throw new IllegalStateException("无法读取所选音频文件");
+                }
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = is.read(buf)) != -1) {
+                    bos.write(buf, 0, n);
+                    if (bos.size() > maxRawBytes) {
+                        throw new IllegalStateException("参考音频过大（本机最多保存约 1.5 MB），请选择 10～30 秒的短片段");
+                    }
+                }
+                bytes = bos.toByteArray();
+            }
+            if (bytes.length == 0) {
+                throw new IllegalStateException("所选音频文件为空");
+            }
+            String dataUrl = prefix + Base64.encodeToString(bytes, Base64.NO_WRAP);
+            if (dataUrl.length() > MAX_STORED_DATA_URL_LENGTH) {
+                throw new IllegalStateException("参考音频过大（本机最多保存约 1.5 MB），请选择更短的音频");
+            }
+            cfg.referenceAudioBase64 = dataUrl;
+            cfg.referenceAudioName = fileName;
+
+            Button pickBtn = activePickAudioBtnRef.get();
+            if (pickBtn != null) {
+                int kb = Math.max(1, bytes.length / 1024);
+                pickBtn.setText("重新选择参考音频（" + fileName + " · " + kb + " KB）");
+            }
+            Button clearBtn = activeClearAudioBtnRef.get();
+            if (clearBtn != null) {
+                clearBtn.setVisibility(View.VISIBLE);
+            }
+            TextView statusTv = activeStatusTvRef.get();
+            if (statusTv != null) {
+                statusTv.setVisibility(View.VISIBLE);
+                statusTv.setTextColor(Color.parseColor("#4B662C"));
+                statusTv.setText("参考音频已载入，可点击「连接测试」或「保存引擎」。");
+            }
+        } catch (Throwable t) {
+            Toast.makeText(activity, "参考音频导入失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private static String resolveAudioMime(Activity activity, Uri uri, String displayName) {
+        String type = activity.getContentResolver().getType(uri);
+        if (type != null) {
+            String lower = type.toLowerCase();
+            if ("audio/mpeg".equals(lower) || "audio/mp3".equals(lower)) {
+                return "audio/mpeg";
+            }
+            if ("audio/wav".equals(lower) || "audio/x-wav".equals(lower) || "audio/wave".equals(lower)) {
+                return "audio/wav";
+            }
+        }
+        String lowerName = displayName != null ? displayName.toLowerCase() : "";
+        if (lowerName.endsWith(".mp3")) {
+            return "audio/mpeg";
+        }
+        if (lowerName.endsWith(".wav")) {
+            return "audio/wav";
+        }
+        throw new IllegalStateException("只支持 MP3 或 WAV 参考音频");
+    }
+
+    private static String queryDisplayName(Activity activity, Uri uri) {
+        try (Cursor c = activity.getContentResolver().query(uri, new String[] { OpenableColumns.DISPLAY_NAME }, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                String name = c.getString(0);
+                if (!TextUtils.isEmpty(name)) {
+                    return name;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        String last = uri.getLastPathSegment();
+        return !TextUtils.isEmpty(last) ? last : "reference.wav";
+    }
+
+    public static void show(Activity activity, Engine existing, OnSavedListener listener) {
+        CloudTtsConfig config = CloudTtsConfig.fromEngine(existing);
 
         Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
-        ScrollView scroll = new ScrollView(activity);
-        GradientDrawable sheetBg = new GradientDrawable();
-        sheetBg.setColor(Color.parseColor("#F6F7F2"));
-        float r24 = dp(activity, 24);
-        sheetBg.setCornerRadii(new float[]{r24, r24, r24, r24, 0, 0, 0, 0});
-        scroll.setBackground(sheetBg);
+        LinearLayout root = new LinearLayout(activity);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.parseColor("#F6F7F2"));
+        root.setPadding(dp(activity, 20), dp(activity, 14), dp(activity, 20), dp(activity, 24));
 
-        LinearLayout container = new LinearLayout(activity);
-        container.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(activity, 20);
-        container.setPadding(pad, dp(activity, 14), pad, dp(activity, 24));
-        scroll.addView(container, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        // 顶部拖拽条
         View handle = new View(activity);
         GradientDrawable handleBg = new GradientDrawable();
         handleBg.setColor(Color.parseColor("#C2C7BA"));
         handleBg.setCornerRadius(dp(activity, 2));
         handle.setBackground(handleBg);
-        LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(dp(activity, 36), dp(activity, 4));
-        hLp.gravity = Gravity.CENTER_HORIZONTAL;
-        hLp.bottomMargin = dp(activity, 14);
-        container.addView(handle, hLp);
+        LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(activity, 36), dp(activity, 4));
+        handleLp.gravity = Gravity.CENTER_HORIZONTAL;
+        handleLp.bottomMargin = dp(activity, 14);
+        root.addView(handle, handleLp);
 
         TextView title = new TextView(activity);
         title.setText("云端 AI 朗读引擎");
-        title.setTextSize(18f);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextSize(20);
         title.setTextColor(Color.parseColor("#1B1C18"));
-        title.setPadding(0, 0, 0, dp(activity, 10));
-        container.addView(title);
+        title.setPadding(0, 0, 0, dp(activity, 14));
+        root.addView(title);
 
-        // 云引擎类型选择
-        TextView lblType = new TextView(activity);
-        lblType.setText("云引擎类型");
-        lblType.setTextSize(12f);
-        lblType.setTextColor(Color.parseColor("#5C6057"));
-        container.addView(lblType);
+        TextView typeLabel = new TextView(activity);
+        typeLabel.setText("云引擎类型");
+        typeLabel.setTextSize(12);
+        typeLabel.setTextColor(Color.parseColor("#5C6057"));
+        root.addView(typeLabel);
 
-        Spinner spinner = new Spinner(activity);
-        spinner.setBackground(roundedBox(activity, "#FFFFFF"));
-        spinner.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
-        CloudTtsProviderType[] providers = CloudTtsProviderType.values();
-        String[] labels = new String[providers.length];
-        int selectedIdx = 0;
-        for (int i = 0; i < providers.length; i++) {
-            labels[i] = providers[i].displayName;
-            if (providers[i] == config.providerType) {
-                selectedIdx = i;
+        Button typeBtn = makePillButton(activity, config.providerType.displayName, "#FFFFFF", "#1B1C18");
+        root.addView(typeBtn, lpMarginTop(activity, 6));
+
+        EditText nameEdit = addInput(activity, root, "引擎名称",
+                TextUtils.isEmpty(config.name) ? config.providerType.displayName : config.name, false);
+        EditText urlEdit = addInput(activity, root, "自定义 Base URL（可选）", config.baseUrl, false);
+        EditText keyEdit = addInput(activity, root, "API Key", config.apiKey, true);
+        EditText modelEdit = addInput(activity, root, "合成引擎 / 模型", config.model, false);
+        View modelContainer = (View) modelEdit.getParent();
+
+        Button mimoModelBtn = makePillButton(activity, "合成引擎：" + config.model, "#FFFFFF", "#1B1C18");
+        root.addView(mimoModelBtn, lpMarginTop(activity, 12));
+
+        Button pickAudioBtn = makePillButton(activity,
+                !TextUtils.isEmpty(config.referenceAudioBase64)
+                        ? ("重新选择参考音频（" + (TextUtils.isEmpty(config.referenceAudioName) ? "已载入" : config.referenceAudioName) + "）")
+                        : "选择 MP3 / WAV 参考音频",
+                "#FFFFFF", "#1B1C18");
+        root.addView(pickAudioBtn, lpMarginTop(activity, 10));
+
+        Button clearAudioBtn = makePillButton(activity, "清除参考音频", "#EAECE4", "#3E4239");
+        root.addView(clearAudioBtn, lpMarginTop(activity, 8));
+
+        TextView mimoCloneHint = new TextView(activity);
+        mimoCloneHint.setText("从手机文件中选择 MP3 或 WAV（约 10～30 秒，不超过 1.5 MB）。应用会在本机编码为 Data URL 并保存在引擎配置中；克隆模型使用非流式请求。");
+        mimoCloneHint.setTextSize(12);
+        mimoCloneHint.setTextColor(Color.parseColor("#5C6057"));
+        mimoCloneHint.setPadding(dp(activity, 4), dp(activity, 8), dp(activity, 4), dp(activity, 4));
+        root.addView(mimoCloneHint);
+
+        Button testBtn = makePillButton(activity, "连接测试", "#DCE6CF", "#2A3B17");
+        root.addView(testBtn, lpMarginTop(activity, 16));
+
+        TextView statusTv = new TextView(activity);
+        statusTv.setTextSize(13);
+        statusTv.setPadding(dp(activity, 4), dp(activity, 8), dp(activity, 4), 0);
+        statusTv.setVisibility(View.GONE);
+        root.addView(statusTv);
+
+        Button saveBtn = makePillButton(activity, "保存引擎", "#4B662C", "#FFFFFF");
+        root.addView(saveBtn, lpMarginTop(activity, 14));
+
+        activeConfigRef = new WeakReference<>(config);
+        activePickAudioBtnRef = new WeakReference<>(pickAudioBtn);
+        activeClearAudioBtnRef = new WeakReference<>(clearAudioBtn);
+        activeStatusTvRef = new WeakReference<>(statusTv);
+
+        Runnable refreshMimoViews = () -> {
+            boolean isMimo = config.providerType == CloudTtsProviderType.MIMO;
+            modelContainer.setVisibility(isMimo ? View.GONE : View.VISIBLE);
+            mimoModelBtn.setVisibility(isMimo ? View.VISIBLE : View.GONE);
+            if (isMimo) {
+                String m = TextUtils.isEmpty(config.model) ? CloudTtsProviderType.MIMO.defaultModel : config.model.trim();
+                config.model = m;
+                modelEdit.setText(m);
+                mimoModelBtn.setText("合成引擎：" + m);
+                boolean isClone = "mimo-v2.5-tts-voiceclone".equalsIgnoreCase(m);
+                pickAudioBtn.setVisibility(isClone ? View.VISIBLE : View.GONE);
+                clearAudioBtn.setVisibility(isClone && !TextUtils.isEmpty(config.referenceAudioBase64) ? View.VISIBLE : View.GONE);
+                mimoCloneHint.setVisibility(isClone ? View.VISIBLE : View.GONE);
+            } else {
+                pickAudioBtn.setVisibility(View.GONE);
+                clearAudioBtn.setVisibility(View.GONE);
+                mimoCloneHint.setVisibility(View.GONE);
             }
-        }
-        spinner.setAdapter(new ArrayAdapter<>(activity, android.R.layout.simple_spinner_dropdown_item, labels));
-        spinner.setSelection(selectedIdx);
-        container.addView(spinner, lpMarginTop(activity, 4));
+        };
+        refreshMimoViews.run();
 
-        EditText etName = addInput(activity, container, "引擎名称", config.name, false);
-        EditText etBaseUrl = addInput(activity, container, "自定义 Base URL（可选）", config.baseUrl, false);
-        EditText etApiKey = addInput(activity, container, "API Key", config.apiKey, true);
-        EditText etModel = addInput(activity, container, "合成引擎 / 模型", config.model, false);
-
-        final boolean[] firstSelect = {true};
-        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
-                if (firstSelect[0]) {
-                    firstSelect[0] = false;
-                    return;
-                }
-                config.providerType = providers[pos];
-                etName.setText(config.providerType.displayName);
-                etBaseUrl.setText(config.providerType.defaultBaseUrl);
-                etModel.setText(config.providerType.defaultModel);
+        typeBtn.setOnClickListener(v -> {
+            PopupMenu menu = new PopupMenu(activity, typeBtn);
+            CloudTtsProviderType[] values = CloudTtsProviderType.values();
+            for (int i = 0; i < values.length; i++) {
+                menu.getMenu().add(0, i, i, values[i].displayName);
             }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
-        });
-
-        Button btnTest = makePillButton(activity, "连接测试", "#DCE6CF", "#2A3B17");
-        container.addView(btnTest, lpMarginTop(activity, 14));
-
-        TextView tvResult = new TextView(activity);
-        tvResult.setTextSize(12.5f);
-        tvResult.setTextColor(Color.parseColor("#5C6057"));
-        tvResult.setPadding(dp(activity, 4), dp(activity, 6), dp(activity, 4), dp(activity, 6));
-        container.addView(tvResult);
-
-        Button btnSave = makePillButton(activity, "保存引擎", "#4B662C", "#FFFFFF");
-        container.addView(btnSave, lpMarginTop(activity, 6));
-
-        btnTest.setOnClickListener(v -> {
-            sync(config, etName, etBaseUrl, etApiKey, etModel);
-            btnTest.setEnabled(false);
-            tvResult.setText("正在测试连接...");
-            Executors.newSingleThreadExecutor().execute(() -> {
-                String msg = CloudAiTtsEngine.testConnection(config);
-                activity.runOnUiThread(() -> {
-                    btnTest.setEnabled(true);
-                    tvResult.setText(msg);
-                });
+            menu.setOnMenuItemClickListener(item -> {
+                CloudTtsProviderType selected = values[item.getItemId()];
+                config.providerType = selected;
+                config.voice = selected.defaultVoice;
+                config.model = selected.defaultModel;
+                typeBtn.setText(selected.displayName);
+                nameEdit.setText(selected.displayName);
+                urlEdit.setText("");
+                modelEdit.setText(selected.defaultModel);
+                refreshMimoViews.run();
+                return true;
             });
+            menu.show();
         });
 
-        btnSave.setOnClickListener(v -> {
-            sync(config, etName, etBaseUrl, etApiKey, etModel);
-            targetEngine.name = config.name;
-            targetEngine.type = config.providerType.engineType;
-            targetEngine.url = config.effectiveBaseUrl();
-            targetEngine.param = config.toParamJson();
-            saveEngineViaReflection(activity, targetEngine);
+        mimoModelBtn.setOnClickListener(v -> {
+            PopupMenu menu = new PopupMenu(activity, mimoModelBtn);
+            for (int i = 0; i < MIMO_MODELS.length; i++) {
+                menu.getMenu().add(0, i, i, MIMO_MODELS[i]);
+            }
+            menu.setOnMenuItemClickListener(item -> {
+                config.model = MIMO_MODELS[item.getItemId()];
+                refreshMimoViews.run();
+                return true;
+            });
+            menu.show();
+        });
+
+        pickAudioBtn.setOnClickListener(v -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("audio/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
+                    "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave"
+            });
+            activity.startActivityForResult(intent, REQ_PICK_MIMO_AUDIO);
+        });
+
+        clearAudioBtn.setOnClickListener(v -> {
+            config.referenceAudioBase64 = "";
+            config.referenceAudioName = "";
+            pickAudioBtn.setText("选择 MP3 / WAV 参考音频");
+            clearAudioBtn.setVisibility(View.GONE);
+            Toast.makeText(activity, "已清除参考音频", Toast.LENGTH_SHORT).show();
+        });
+
+        testBtn.setOnClickListener(v -> {
+            sync(config, nameEdit, urlEdit, keyEdit, modelEdit);
+            statusTv.setVisibility(View.VISIBLE);
+            statusTv.setTextColor(Color.parseColor("#5C6057"));
+            statusTv.setText("正在测试连接...");
+            testBtn.setEnabled(false);
+            new Thread(() -> {
+                String res = CloudAiTtsEngine.testConnection(config);
+                activity.runOnUiThread(() -> {
+                    testBtn.setEnabled(true);
+                    statusTv.setTextColor(res.startsWith("连接成功")
+                            ? Color.parseColor("#4B662C")
+                            : Color.parseColor("#BA1A1A"));
+                    statusTv.setText(res);
+                });
+            }).start();
+        });
+
+        saveBtn.setOnClickListener(v -> {
+            sync(config, nameEdit, urlEdit, keyEdit, modelEdit);
+            Engine target = existing != null ? existing : new Engine();
+            if (TextUtils.isEmpty(target.code)) {
+                target.code = "cloud_" + UUID.randomUUID().toString().substring(0, 8);
+            }
+            target.name = TextUtils.isEmpty(config.name) ? config.providerType.displayName : config.name;
+            target.type = config.providerType.engineType;
+            target.url = config.effectiveBaseUrl();
+            target.param = config.toParamJson();
+            target.header = "";
+            target.sort = existing != null ? existing.sort : 0;
+
+            saveEngineViaReflection(activity, target, existing != null);
+            Toast.makeText(activity, "已保存云引擎：" + target.name, Toast.LENGTH_SHORT).show();
             if (listener != null) {
-                listener.onSaved(targetEngine);
+                listener.onSaved(target);
             }
             dialog.dismiss();
         });
 
+        ScrollView scroll = new ScrollView(activity);
+        scroll.addView(root);
         dialog.setContentView(scroll);
-        Window w = dialog.getWindow();
-        if (w != null) {
-            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            w.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
-            w.setGravity(Gravity.BOTTOM);
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            win.setGravity(Gravity.BOTTOM);
+            win.setBackgroundDrawable(roundedBox(activity, "#F6F7F2"));
         }
         dialog.show();
     }
 
-    private static EditText addInput(Activity act, LinearLayout parent, String label, String val, boolean secret) {
-        TextView tv = new TextView(act);
-        tv.setText(label);
-        tv.setTextSize(12f);
-        tv.setTextColor(Color.parseColor("#5C6057"));
-        parent.addView(tv, lpMarginTop(act, 10));
-
-        EditText et = new EditText(act);
-        et.setBackground(roundedBox(act, "#EAECE4"));
-        et.setPadding(dp(act, 14), dp(act, 11), dp(act, 14), dp(act, 11));
-        et.setTextSize(14.5f);
-        et.setTextColor(Color.parseColor("#1B1C18"));
-        if (secret) {
-            et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        } else {
-            et.setSingleLine(true);
+    private static void sync(CloudTtsConfig config, EditText nameEdit, EditText urlEdit, EditText keyEdit, EditText modelEdit) {
+        config.name = nameEdit.getText().toString().trim();
+        config.baseUrl = urlEdit.getText().toString().trim();
+        config.apiKey = keyEdit.getText().toString().trim();
+        if (config.providerType != CloudTtsProviderType.MIMO) {
+            String m = modelEdit.getText().toString().trim();
+            config.model = TextUtils.isEmpty(m) ? config.providerType.defaultModel : m;
         }
-        et.setText(val);
-        parent.addView(et, lpMarginTop(act, 4));
+    }
+
+    private static void saveEngineViaReflection(Activity activity, Engine target, boolean isUpdate) {
+        try {
+            Class<?> dbClass = Class.forName("Q6.c");
+            Method tMethod = dbClass.getMethod("t", android.content.Context.class);
+            Object db = tMethod.invoke(null, activity);
+            Object dao = db.getClass().getMethod("engineDao").invoke(db);
+            if (isUpdate) {
+                dao.getClass().getMethod("update", Engine[].class).invoke(dao, (Object) new Engine[] { target });
+            } else {
+                dao.getClass().getMethod("insert", Engine[].class).invoke(dao, (Object) new Engine[] { target });
+            }
+            try {
+                db.getClass().getMethod("close").invoke(db);
+            } catch (Throwable ignored) {
+            }
+        } catch (Throwable t) {
+            Toast.makeText(activity, "保存失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private static EditText addInput(Activity activity, LinearLayout parent, String label, String val, boolean password) {
+        LinearLayout wrap = new LinearLayout(activity);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+
+        TextView tv = new TextView(activity);
+        tv.setText(label);
+        tv.setTextSize(12);
+        tv.setTextColor(Color.parseColor("#5C6057"));
+        wrap.addView(tv);
+
+        EditText et = new EditText(activity);
+        et.setText(val != null ? val : "");
+        et.setTextSize(15);
+        et.setTextColor(Color.parseColor("#1B1C18"));
+        et.setBackground(roundedBox(activity, "#EAECE4"));
+        et.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
+        if (password) {
+            et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        }
+        wrap.addView(et, lpMarginTop(activity, 6));
+        parent.addView(wrap, lpMarginTop(activity, 12));
         return et;
     }
 
-    private static Button makePillButton(Activity act, String text, String bgHex, String fgHex) {
-        Button btn = new Button(act);
+    private static Button makePillButton(Activity activity, String text, String bgHex, String fgHex) {
+        Button btn = new Button(activity);
         btn.setText(text);
         btn.setAllCaps(false);
-        btn.setTextSize(14.5f);
         btn.setTextColor(Color.parseColor(fgHex));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor(bgHex));
-        bg.setCornerRadius(dp(act, 24));
-        btn.setBackground(bg);
-        btn.setPadding(0, dp(act, 12), 0, dp(act, 12));
+        btn.setBackground(roundedBox(activity, bgHex));
+        btn.setPadding(dp(activity, 16), dp(activity, 12), dp(activity, 16), dp(activity, 12));
         return btn;
     }
 
-    private static GradientDrawable roundedBox(Activity act, String hex) {
-        GradientDrawable gd = new GradientDrawable();
-        gd.setColor(Color.parseColor(hex));
-        gd.setCornerRadius(dp(act, 14));
-        return gd;
+    private static GradientDrawable roundedBox(Activity activity, String hex) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(Color.parseColor(hex));
+        d.setCornerRadius(dp(activity, 18));
+        return d;
     }
 
-    private static void sync(CloudTtsConfig config, EditText etName, EditText etBaseUrl,
-                             EditText etApiKey, EditText etModel) {
-        config.name = etName.getText().toString().trim();
-        config.baseUrl = etBaseUrl.getText().toString().trim();
-        config.apiKey = etApiKey.getText().toString().trim();
-        String m = etModel.getText().toString().trim();
-        config.model = m.isEmpty() ? config.providerType.defaultModel : m;
-    }
-
-    private static void saveEngineViaReflection(Activity activity, Engine engine) {
-        try {
-            Class<?> q6c = Class.forName("Q6.c");
-            Object db = q6c.getMethod("t").invoke(null);
-            Object dao = db.getClass().getMethod("engineDao").invoke(db);
-            try {
-                dao.getClass().getMethod("insert", Engine.class).invoke(dao, engine);
-            } catch (Throwable ignored) {
-                dao.getClass().getMethod("update", Engine.class).invoke(dao, engine);
-            }
-            db.getClass().getMethod("close").invoke(db);
-            Toast.makeText(activity, "已保存云引擎：" + engine.name, Toast.LENGTH_SHORT).show();
-        } catch (Throwable t) {
-            Toast.makeText(activity, "保存失败：" + t.getMessage(), Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private static LinearLayout.LayoutParams lpMarginTop(Activity act, int topDp) {
+    private static LinearLayout.LayoutParams lpMarginTop(Activity activity, int topDp) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(act, topDp);
+        lp.topMargin = dp(activity, topDp);
         return lp;
     }
 
-    private static int dp(Activity act, int v) {
-        return Math.round(TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, v, act.getResources().getDisplayMetrics()));
+    private static int dp(Activity activity, int v) {
+        return Math.round(v * activity.getResources().getDisplayMetrics().density);
     }
 }
