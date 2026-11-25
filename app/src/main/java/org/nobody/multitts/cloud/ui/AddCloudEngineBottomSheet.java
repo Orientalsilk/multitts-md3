@@ -423,11 +423,18 @@ public class AddCloudEngineBottomSheet {
             saveEngineViaReflection(activity, target);
             int speakerCount = ensureDefaultSpeakerViaReflection(activity, target, config);
             try {
+                Class.forName("K6.d").getMethod("i", android.content.Context.class).invoke(null, activity.getApplicationContext());
+            } catch (Throwable ignored) {}
+            try {
                 Class.forName("Z6.o").getMethod("d").invoke(null);
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                Toast.makeText(activity, "顶栏刷新异常：" + t.getMessage(), Toast.LENGTH_SHORT).show();
             }
+            try {
+                Class.forName("R6.i").getMethod("e").invoke(null);
+            } catch (Throwable ignored) {}
             if (speakerCount > 0) {
-                Toast.makeText(activity, "已保存云引擎并刷新顶栏（" + target.name + "，共 " + speakerCount + " 个）", Toast.LENGTH_SHORT).show();
+                Toast.makeText(activity, "已保存云引擎（" + target.name + "，共 " + speakerCount + " 个）", Toast.LENGTH_SHORT).show();
             }
             if (listener != null) {
                 listener.onSaved(target);
