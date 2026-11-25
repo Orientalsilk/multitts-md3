@@ -375,6 +375,9 @@ public class CloudAiTtsEngine implements h {
             activeConn.compareAndSet(conn, null);
             conn.disconnect();
         }
+        if (pcmOut.size() == 0) {
+            throw new IOException("MiMo TTS 没有返回音频数据");
+        }
         return pcm16MonoToWav(pcmOut.toByteArray(), 24000);
     }
 
@@ -394,9 +397,8 @@ public class CloudAiTtsEngine implements h {
         Map<String, String> headers = new HashMap<>();
         headers.put("Authorization", "Bearer " + config.apiKey);
         headers.put("Content-Type", "application/json; charset=utf-8");
-        if (!TextUtils.isEmpty(config.model)) {
-            headers.put("model", config.model);
-        }
+        String fishModel = !TextUtils.isEmpty(config.model) ? config.model.trim() : CloudTtsProviderType.FISHAUDIO.defaultModel;
+        headers.put("model", fishModel);
         return executeBytes("POST", url, headers, body.toString().getBytes(StandardCharsets.UTF_8));
     }
 
