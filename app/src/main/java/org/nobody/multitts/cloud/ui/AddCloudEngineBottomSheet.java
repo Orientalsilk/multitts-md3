@@ -479,7 +479,6 @@ public class AddCloudEngineBottomSheet {
     private static boolean ensureDefaultSpeakerViaReflection(Activity activity, Engine target, CloudTtsConfig config) {
         try {
             Speaker sp = new Speaker();
-            sp.id = "sp_" + target.code;
             sp.code = target.code;
             sp.group = target.code;
             sp.name = target.name;
@@ -500,8 +499,28 @@ public class AddCloudEngineBottomSheet {
             sp.param = isCloneOrDesign ? "" : (config.voice != null ? config.voice : "");
 
             Class<?> qc = Class.forName("Q6.c");
-            Method saveSpeaker = qc.getMethod("Y", Speaker.class);
-            saveSpeaker.invoke(null, sp);
+            try {
+                Object computedId = qc.getMethod("B", Speaker.class).invoke(null, sp);
+                if (computedId instanceof String && !TextUtils.isEmpty((String) computedId)) {
+                    sp.id = (String) computedId;
+                }
+            } catch (Throwable ignored) {
+            }
+            if (TextUtils.isEmpty(sp.id)) {
+                sp.id = "sp_" + target.code;
+            }
+
+            qc.getMethod("Y", Speaker.class).invoke(null, sp);
+            try {
+                Class.forName("K6.d").getMethod("i", android.content.Context.class)
+                        .invoke(null, activity.getApplicationContext());
+            } catch (Throwable ignored) {
+            }
+            try {
+                qc.getMethod("K", android.content.Context.class)
+                        .invoke(null, activity.getApplicationContext());
+            } catch (Throwable ignored) {
+            }
             try {
                 qc.getMethod("Z").invoke(null);
             } catch (Throwable ignored) {
