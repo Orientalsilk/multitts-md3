@@ -517,7 +517,15 @@ public class AddCloudEngineBottomSheet {
             sp.speed = 1.0f;
             sp.pitch = 1.0f;
             sp.volume = 1.0f;
-            sp.param = isCloneOrDesign ? "" : (config.voice != null ? config.voice : "");
+            if ("mimo-v2.5-tts-voiceclone".equalsIgnoreCase(config.model)
+                    && config.providerType == CloudTtsProviderType.MIMO) {
+                sp.param = config.referenceAudioBase64 != null ? config.referenceAudioBase64 : "";
+            } else if ("mimo-v2.5-tts-voicedesign".equalsIgnoreCase(config.model)
+                    && config.providerType == CloudTtsProviderType.MIMO) {
+                sp.param = config.instructions != null ? config.instructions : "";
+            } else {
+                sp.param = config.voice != null ? config.voice : "";
+            }
 
             Class<?> qc = Class.forName("Q6.c");
             try {
@@ -595,30 +603,94 @@ public class AddCloudEngineBottomSheet {
         title.setPadding(0, 0, 0, dp(activity, 12));
         root.addView(title);
 
-        String initName = existingSp != null && !TextUtils.isEmpty(existingSp.name) ? existingSp.name : "";
-        String initVoice = existingSp != null && !TextUtils.isEmpty(existingSp.param) ? existingSp.param : cfg.voice;
-        EditText spNameEdit = addInput(activity, root, "音色显示名称（如：旁白男声 / 御姐音）", initName, false);
-        EditText spVoiceEdit = addInput(activity, root, "Voice ID / Fish Audio reference_id", initVoice, false);
+        boolean isClone = cfg.providerType == CloudTtsProviderType.MIMO
+                && "mimo-v2.5-tts-voiceclone".equalsIgnoreCase(cfg.model);
+        boolean isDesign = cfg.providerType == CloudTtsProviderType.MIMO
+                && "mimo-v2.5-tts-voicedesign".equalsIgnoreCase(cfg.model);
 
-        String[] presets = presetVoicesFor(cfg.providerType);
-        if (presets.length > 0) {
-            Button quickBtn = makePillButton(activity, "快捷选择预设音色", "#EAECE4", "#2A3B17");
-            root.addView(quickBtn, lpMarginTop(activity, 8));
-            quickBtn.setOnClickListener(v -> {
-                PopupMenu pm = new PopupMenu(activity, quickBtn);
-                for (int i = 0; i < presets.length; i++) {
-                    pm.getMenu().add(0, i, i, presets[i]);
-                }
-                pm.setOnMenuItemClickListener(item -> {
-                    String chosen = presets[item.getItemId()];
-                    spVoiceEdit.setText(chosen);
-                    if (TextUtils.isEmpty(spNameEdit.getText().toString().trim())) {
-                        spNameEdit.setText(chosen);
-                    }
-                    return true;
-                });
-                pm.show();
+        String initName = existingSp != null && !TextUtils.isEmpty(existingSp.name) ? existingSp.name : "";
+        String initVoice = "";
+        if (isDesign) {
+            initVoice = existingSp != null && !TextUtils.isEmpty(existingSp.param) ? existingSp.param : cfg.instructions;
+        } else if (!isClone) {
+            initVoice = existingSp != null && !TextUtils.isEmpty(existingSp.param) ? existingSp.param : cfg.voice;
+        }
+
+        EditText spNameEdit = addInput(activity, root, "音色显示名称（如：旁白男声 / 御姐音）", initName, false);
+        EditText spVoiceEdit = addInput(activity, root,
+                isDesign ? "音色设计描述词（如：温柔知性的年轻女声）" : "Voice ID / Fish Audio reference_id",
+                initVoice, false);
+        View spVoiceWrap = (View) spVoiceEdit.getParent();
+        spVoiceWrap.setVisibility(isClone ? View.GONE : View.VISIBLE);
+
+        final CloudTtsConfig cloneHolder = new CloudTtsConfig();
+        if (isClone && existingSp != null && !TextUtils.isEmpty(existingSp.param)
+                && (existingSp.param.startsWith("data:audio/") || existingSp.param.length() > 128)) {
+            cloneHolder.referenceAudioBase64 = existingSp.param;
+            cloneHolder.referenceAudioName = !TextUtils.isEmpty(existingSp.code) ? existingSp.code : cfg.referenceAudioName;
+        }
+
+        Button pickAudioBtn = makePillButton(activity,
+                TextUtils.isEmpty(cloneHolder.referenceAudioName)
+                        ? "选择 MP3 / WAV 参考音频"
+                        : "重新选择参考音频（" + cloneHolder.referenceAudioName + "）",
+                "#EAECE4", "#2A3B17");
+        Button clearAudioBtn = makePillButton(activity, "清除参考音频", "#F2E4E4", "#8C1D18");
+        TextView cloneStatusTv = new TextView(activity);
+        cloneStatusTv.setTextSize(12);
+        cloneStatusTv.setPadding(dp(4), dp(8), dp(4), 0);
+
+        if (isClone) {
+            root.addView(pickAudioBtn, lpMarginTop(activity, 10));
+            root.addView(clearAudioBtn, lpMarginTop(activity, 8));
+            clearAudioBtn.setVisibility(TextUtils.isEmpty(cloneHolder.referenceAudioBase64) ? View.GONE : View.VISIBLE);
+            cloneStatusTv.setVisibility(View.VISIBLE);
+            cloneStatusTv.setTextColor(Color.parseColor("#5C6057"));
+            cloneStatusTv.setText(TextUtils.isEmpty(cloneHolder.referenceAudioBase64)
+                    ? "请为该克隆音色选择 10～30 秒清晰人声（MP3 / WAV，≤ 1.5 MB）"
+                    : "已绑定参考音频：" + cloneHolder.referenceAudioName);
+            root.addView(cloneStatusTv);
+
+            activeConfigRef = new WeakReference<>(cloneHolder);
+            activePickAudioBtnRef = new WeakReference<>(pickAudioBtn);
+            activeClearAudioBtnRef = new WeakReference<>(clearAudioBtn);
+            activeStatusTvRef = new WeakReference<>(cloneStatusTv);
+
+            pickAudioBtn.setOnClickListener(v -> {
+                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                intent.setType("audio/*");
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp3"});
+                activity.startActivityForResult(intent, REQ_PICK_MIMO_AUDIO);
             });
+            clearAudioBtn.setOnClickListener(v -> {
+                cloneHolder.referenceAudioBase64 = "";
+                cloneHolder.referenceAudioName = "";
+                pickAudioBtn.setText("选择 MP3 / WAV 参考音频");
+                clearAudioBtn.setVisibility(View.GONE);
+                cloneStatusTv.setText("已清除参考音频，请重新选择");
+            });
+        } else {
+            String[] presets = isDesign ? new String[0] : presetVoicesFor(cfg.providerType);
+            if (presets.length > 0) {
+                Button quickBtn = makePillButton(activity, "快捷选择预设音色", "#EAECE4", "#2A3B17");
+                root.addView(quickBtn, lpMarginTop(activity, 8));
+                quickBtn.setOnClickListener(v -> {
+                    PopupMenu pm = new PopupMenu(activity, quickBtn);
+                    for (int i = 0; i < presets.length; i++) {
+                        pm.getMenu().add(0, i, i, presets[i]);
+                    }
+                    pm.setOnMenuItemClickListener(item -> {
+                        String chosen = presets[item.getItemId()];
+                        spVoiceEdit.setText(chosen);
+                        if (TextUtils.isEmpty(spNameEdit.getText().toString().trim())) {
+                            spNameEdit.setText(chosen);
+                        }
+                        return true;
+                    });
+                    pm.show();
+                });
+            }
         }
 
         Button saveBtn = makePillButton(activity, "保存音色", "#4B662C", "#FFFFFF");
@@ -626,9 +698,20 @@ public class AddCloudEngineBottomSheet {
 
         saveBtn.setOnClickListener(v -> {
             String vName = spNameEdit.getText().toString().trim();
-            String vId = spVoiceEdit.getText().toString().trim();
+            String vId = isClone ? cloneHolder.referenceAudioBase64 : spVoiceEdit.getText().toString().trim();
+            if (isClone && TextUtils.isEmpty(vId)) {
+                Toast.makeText(activity, "请先选择 MP3 / WAV 参考音频", Toast.LENGTH_SHORT).show();
+                return;
+            }
             if (TextUtils.isEmpty(vName)) {
-                vName = !TextUtils.isEmpty(vId) ? vId : engine.name;
+                if (isClone && !TextUtils.isEmpty(cloneHolder.referenceAudioName)) {
+                    int dot = cloneHolder.referenceAudioName.lastIndexOf('.');
+                    vName = dot > 0 ? cloneHolder.referenceAudioName.substring(0, dot) : cloneHolder.referenceAudioName;
+                } else if (!isClone && !TextUtils.isEmpty(vId)) {
+                    vName = vId.length() > 24 ? vId.substring(0, 24) : vId;
+                } else {
+                    vName = engine.name;
+                }
             }
             try {
                 Class<?> qc = Class.forName("Q6.c");
@@ -643,7 +726,13 @@ public class AddCloudEngineBottomSheet {
                 }
                 Speaker sp = existingSp != null ? existingSp : new Speaker();
                 sp.group = engine.code;
-                if (!TextUtils.isEmpty(vId)) {
+                if (isClone) {
+                    sp.code = !TextUtils.isEmpty(cloneHolder.referenceAudioName)
+                            ? cloneHolder.referenceAudioName
+                            : (engine.code + "_" + UUID.randomUUID().toString().substring(0, 6));
+                } else if (isDesign) {
+                    sp.code = vName;
+                } else if (!TextUtils.isEmpty(vId)) {
                     sp.code = vId;
                 } else if (TextUtils.isEmpty(sp.code)) {
                     sp.code = engine.code + "_" + UUID.randomUUID().toString().substring(0, 6);

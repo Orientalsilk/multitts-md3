@@ -216,8 +216,18 @@ public class CloudEngineActivity extends Activity {
         nameTv.setTextColor(Color.parseColor("#1B1C18"));
         TextView subTv = new TextView(this);
         CloudTtsConfig cfg = CloudTtsConfig.fromEngine(engine);
-        String voiceInfo = !TextUtils.isEmpty(sp.param) ? sp.param
-                : (!TextUtils.isEmpty(cfg.referenceAudioName) ? ("克隆：" + cfg.referenceAudioName) : cfg.model);
+        boolean isCloneCard = cfg.providerType == CloudTtsProviderType.MIMO
+                && "mimo-v2.5-tts-voiceclone".equalsIgnoreCase(cfg.model);
+        String voiceInfo;
+        if (isCloneCard) {
+            String cloneLabel = (!TextUtils.isEmpty(sp.code) && !sp.code.equals(engine.code))
+                    ? sp.code
+                    : (!TextUtils.isEmpty(cfg.referenceAudioName) ? cfg.referenceAudioName : "已配置参考音频");
+            voiceInfo = "克隆：" + cloneLabel;
+        } else {
+            voiceInfo = !TextUtils.isEmpty(sp.param) ? sp.param
+                    : (!TextUtils.isEmpty(sp.code) ? sp.code : cfg.model);
+        }
         subTv.setText(cfg.model + " · " + voiceInfo);
         subTv.setTextSize(12);
         subTv.setTextColor(Color.parseColor("#5C6057"));
