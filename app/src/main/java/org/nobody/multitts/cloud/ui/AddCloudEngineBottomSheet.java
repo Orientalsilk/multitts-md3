@@ -638,7 +638,7 @@ public class AddCloudEngineBottomSheet {
         Button clearAudioBtn = makePillButton(activity, "清除参考音频", "#F2E4E4", "#8C1D18");
         TextView cloneStatusTv = new TextView(activity);
         cloneStatusTv.setTextSize(12);
-        cloneStatusTv.setPadding(dp(4), dp(8), dp(4), 0);
+        cloneStatusTv.setPadding(dp(activity, 4), dp(activity, 8), dp(activity, 4), 0);
 
         if (isClone) {
             root.addView(pickAudioBtn, lpMarginTop(activity, 10));
