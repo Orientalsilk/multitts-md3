@@ -419,8 +419,9 @@ public class AddCloudEngineBottomSheet {
             target.header = "";
 
             saveEngineViaReflection(activity, target);
-            ensureDefaultSpeakerViaReflection(target, config);
-            Toast.makeText(activity, "已保存云引擎并生成音色：" + target.name, Toast.LENGTH_SHORT).show();
+            if (ensureDefaultSpeakerViaReflection(activity, target, config)) {
+                Toast.makeText(activity, "已保存云引擎并生成音色：" + target.name, Toast.LENGTH_SHORT).show();
+            }
             if (listener != null) {
                 listener.onSaved(target);
             }
@@ -475,7 +476,7 @@ public class AddCloudEngineBottomSheet {
         }
     }
 
-    private static void ensureDefaultSpeakerViaReflection(Engine target, CloudTtsConfig config) {
+    private static boolean ensureDefaultSpeakerViaReflection(Activity activity, Engine target, CloudTtsConfig config) {
         try {
             Speaker sp = new Speaker();
             sp.id = "sp_" + target.code;
@@ -483,8 +484,13 @@ public class AddCloudEngineBottomSheet {
             sp.group = target.code;
             sp.name = target.name;
             sp.locale = "zh-CN";
+            sp.desc = "";
+            sp.note = "";
+            sp.extendUI = "";
+            sp.avatar = "";
             sp.sampleRate = 24000;
-            sp.type = 0;
+            sp.type = 1;
+            sp.gender = 0;
             sp.speed = 1.0f;
             sp.pitch = 1.0f;
             sp.volume = 1.0f;
@@ -496,7 +502,15 @@ public class AddCloudEngineBottomSheet {
             Class<?> qc = Class.forName("Q6.c");
             Method saveSpeaker = qc.getMethod("Y", Speaker.class);
             saveSpeaker.invoke(null, sp);
-        } catch (Throwable ignored) {
+            try {
+                qc.getMethod("Z").invoke(null);
+            } catch (Throwable ignored) {
+            }
+            return true;
+        } catch (Throwable t) {
+            Throwable cause = t.getCause() != null ? t.getCause() : t;
+            Toast.makeText(activity, "音色生成失败：" + cause.getMessage(), Toast.LENGTH_LONG).show();
+            return false;
         }
     }
 
