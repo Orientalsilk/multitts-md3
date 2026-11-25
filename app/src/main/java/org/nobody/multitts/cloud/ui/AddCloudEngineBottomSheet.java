@@ -31,6 +31,7 @@ import org.nobody.multitts.cloud.CloudAiTtsEngine;
 import org.nobody.multitts.cloud.CloudTtsConfig;
 import org.nobody.multitts.cloud.CloudTtsProviderType;
 import org.nobody.multitts.tts.engine.Engine;
+import org.nobody.multitts.tts.speaker.Speaker;
 
 public class AddCloudEngineBottomSheet {
 
@@ -150,6 +151,37 @@ public class AddCloudEngineBottomSheet {
         return !TextUtils.isEmpty(last) ? last : "reference.wav";
     }
 
+    private static String[] presetVoicesFor(CloudTtsProviderType type) {
+        switch (type) {
+            case OPENAI:
+                return new String[] { "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar" };
+            case GEMINI:
+                return new String[] { "Kore", "Puck", "Charon", "Fenrir", "Aoede", "Zephyr", "Leda", "Orus" };
+            case MIMO:
+                return new String[] { "mimo_default", "冰糖", "茉莉", "苏打", "白桦", "Mia", "Chloe", "Milo", "Dean" };
+            case ALIBABA:
+                return new String[] { "Cherry", "Ethan", "Chelsie", "Serena", "Dylan", "Jada", "Sunny" };
+            case VOLCENGINE:
+                return new String[] { "BV001_streaming", "BV002_streaming", "BV700_streaming", "BV701_streaming" };
+            case AZURE:
+                return new String[] { "zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural", "zh-CN-YunjianNeural", "zh-CN-XiaoyiNeural" };
+            case POLLY:
+                return new String[] { "Zhiyu", "Joanna", "Matthew", "Ivy" };
+            default:
+                return new String[0];
+        }
+    }
+
+    public static void show(Activity activity, CloudTtsProviderType initialType, OnSavedListener listener) {
+        Engine preset = null;
+        if (initialType != null) {
+            preset = new Engine();
+            preset.type = initialType.engineType;
+            preset.name = initialType.displayName;
+        }
+        show(activity, preset, listener);
+    }
+
     public static void show(Activity activity, Engine existing, OnSavedListener listener) {
         CloudTtsConfig config = CloudTtsConfig.fromEngine(existing);
 
@@ -190,12 +222,31 @@ public class AddCloudEngineBottomSheet {
         EditText nameEdit = addInput(activity, root, "引擎名称",
                 TextUtils.isEmpty(config.name) ? config.providerType.displayName : config.name, false);
         EditText urlEdit = addInput(activity, root, "自定义 Base URL（可选）", config.baseUrl, false);
-        EditText keyEdit = addInput(activity, root, "API Key", config.apiKey, true);
+        EditText keyEdit = addInput(activity, root, "API Key / Access Key", config.apiKey, true);
+
+        EditText secretKeyEdit = addInput(activity, root, "Secret Access Key（Amazon Polly 必填）", config.secretKey, true);
+        View secretKeyWrap = (View) secretKeyEdit.getParent();
+
+        EditText appIdEdit = addInput(activity, root, "App ID（火山引擎必填）", config.appId, false);
+        View appIdWrap = (View) appIdEdit.getParent();
+
+        EditText regionEdit = addInput(activity, root, "区域 Region（如 eastasia / us-east-1）", config.region, false);
+        View regionWrap = (View) regionEdit.getParent();
+
         EditText modelEdit = addInput(activity, root, "合成引擎 / 模型", config.model, false);
         View modelContainer = (View) modelEdit.getParent();
 
         Button mimoModelBtn = makePillButton(activity, "合成引擎：" + config.model, "#FFFFFF", "#1B1C18");
         root.addView(mimoModelBtn, lpMarginTop(activity, 12));
+
+        EditText voiceEdit = addInput(activity, root, "音色 / Voice ID（可选，Fish Audio 填 reference_id）", config.voice, false);
+        View voiceWrap = (View) voiceEdit.getParent();
+
+        Button quickVoiceBtn = makePillButton(activity, "快捷选择预设音色", "#EAECE4", "#2A3B17");
+        root.addView(quickVoiceBtn, lpMarginTop(activity, 8));
+
+        EditText instructionsEdit = addInput(activity, root, "音色描述 / 情感指令（可选，MiMo 音色设计必填）", config.instructions, false);
+        View instructionsWrap = (View) instructionsEdit.getParent();
 
         Button pickAudioBtn = makePillButton(activity,
                 !TextUtils.isEmpty(config.referenceAudioBase64)
@@ -223,7 +274,7 @@ public class AddCloudEngineBottomSheet {
         statusTv.setVisibility(View.GONE);
         root.addView(statusTv);
 
-        Button saveBtn = makePillButton(activity, "保存引擎", "#4B662C", "#FFFFFF");
+        Button saveBtn = makePillButton(activity, "保存引擎并生成音色", "#4B662C", "#FFFFFF");
         root.addView(saveBtn, lpMarginTop(activity, 14));
 
         activeConfigRef = new WeakReference<>(config);
@@ -231,26 +282,39 @@ public class AddCloudEngineBottomSheet {
         activeClearAudioBtnRef = new WeakReference<>(clearAudioBtn);
         activeStatusTvRef = new WeakReference<>(statusTv);
 
-        Runnable refreshMimoViews = () -> {
-            boolean isMimo = config.providerType == CloudTtsProviderType.MIMO;
+        Runnable refreshDynamicViews = () -> {
+            CloudTtsProviderType pt = config.providerType;
+            boolean isMimo = pt == CloudTtsProviderType.MIMO;
+            boolean isPolly = pt == CloudTtsProviderType.POLLY;
+            boolean isAzure = pt == CloudTtsProviderType.AZURE;
+            boolean isVolc = pt == CloudTtsProviderType.VOLCENGINE;
+
+            secretKeyWrap.setVisibility(isPolly ? View.VISIBLE : View.GONE);
+            appIdWrap.setVisibility(isVolc ? View.VISIBLE : View.GONE);
+            regionWrap.setVisibility((isPolly || isAzure) ? View.VISIBLE : View.GONE);
+
             modelContainer.setVisibility(isMimo ? View.GONE : View.VISIBLE);
             mimoModelBtn.setVisibility(isMimo ? View.VISIBLE : View.GONE);
+
+            boolean isClone = false;
+            boolean isDesign = false;
             if (isMimo) {
                 String m = TextUtils.isEmpty(config.model) ? CloudTtsProviderType.MIMO.defaultModel : config.model.trim();
                 config.model = m;
                 modelEdit.setText(m);
                 mimoModelBtn.setText("合成引擎：" + m);
-                boolean isClone = "mimo-v2.5-tts-voiceclone".equalsIgnoreCase(m);
-                pickAudioBtn.setVisibility(isClone ? View.VISIBLE : View.GONE);
-                clearAudioBtn.setVisibility(isClone && !TextUtils.isEmpty(config.referenceAudioBase64) ? View.VISIBLE : View.GONE);
-                mimoCloneHint.setVisibility(isClone ? View.VISIBLE : View.GONE);
-            } else {
-                pickAudioBtn.setVisibility(View.GONE);
-                clearAudioBtn.setVisibility(View.GONE);
-                mimoCloneHint.setVisibility(View.GONE);
+                isClone = "mimo-v2.5-tts-voiceclone".equalsIgnoreCase(m);
+                isDesign = "mimo-v2.5-tts-voicedesign".equalsIgnoreCase(m);
             }
+
+            voiceWrap.setVisibility((isClone || isDesign) ? View.GONE : View.VISIBLE);
+            quickVoiceBtn.setVisibility((!isClone && !isDesign && presetVoicesFor(pt).length > 0) ? View.VISIBLE : View.GONE);
+            instructionsWrap.setVisibility((pt.usesInstruction || isMimo) ? View.VISIBLE : View.GONE);
+            pickAudioBtn.setVisibility(isClone ? View.VISIBLE : View.GONE);
+            clearAudioBtn.setVisibility(isClone && !TextUtils.isEmpty(config.referenceAudioBase64) ? View.VISIBLE : View.GONE);
+            mimoCloneHint.setVisibility(isClone ? View.VISIBLE : View.GONE);
         };
-        refreshMimoViews.run();
+        refreshDynamicViews.run();
 
         typeBtn.setOnClickListener(v -> {
             PopupMenu menu = new PopupMenu(activity, typeBtn);
@@ -267,7 +331,8 @@ public class AddCloudEngineBottomSheet {
                 nameEdit.setText(selected.displayName);
                 urlEdit.setText("");
                 modelEdit.setText(selected.defaultModel);
-                refreshMimoViews.run();
+                voiceEdit.setText(selected.defaultVoice);
+                refreshDynamicViews.run();
                 return true;
             });
             menu.show();
@@ -280,7 +345,25 @@ public class AddCloudEngineBottomSheet {
             }
             menu.setOnMenuItemClickListener(item -> {
                 config.model = MIMO_MODELS[item.getItemId()];
-                refreshMimoViews.run();
+                refreshDynamicViews.run();
+                return true;
+            });
+            menu.show();
+        });
+
+        quickVoiceBtn.setOnClickListener(v -> {
+            String[] presets = presetVoicesFor(config.providerType);
+            if (presets.length == 0) {
+                return;
+            }
+            PopupMenu menu = new PopupMenu(activity, quickVoiceBtn);
+            for (int i = 0; i < presets.length; i++) {
+                menu.getMenu().add(0, i, i, presets[i]);
+            }
+            menu.setOnMenuItemClickListener(item -> {
+                String chosen = presets[item.getItemId()];
+                config.voice = chosen;
+                voiceEdit.setText(chosen);
                 return true;
             });
             menu.show();
@@ -305,7 +388,7 @@ public class AddCloudEngineBottomSheet {
         });
 
         testBtn.setOnClickListener(v -> {
-            sync(config, nameEdit, urlEdit, keyEdit, modelEdit);
+            sync(config, nameEdit, urlEdit, keyEdit, secretKeyEdit, appIdEdit, regionEdit, modelEdit, voiceEdit, instructionsEdit);
             statusTv.setVisibility(View.VISIBLE);
             statusTv.setTextColor(Color.parseColor("#5C6057"));
             statusTv.setText("正在测试连接...");
@@ -323,8 +406,9 @@ public class AddCloudEngineBottomSheet {
         });
 
         saveBtn.setOnClickListener(v -> {
-            sync(config, nameEdit, urlEdit, keyEdit, modelEdit);
-            Engine target = existing != null ? existing : new Engine();
+            sync(config, nameEdit, urlEdit, keyEdit, secretKeyEdit, appIdEdit, regionEdit, modelEdit, voiceEdit, instructionsEdit);
+            boolean isEdit = existing != null && !TextUtils.isEmpty(existing.code);
+            Engine target = isEdit ? existing : new Engine();
             if (TextUtils.isEmpty(target.code)) {
                 target.code = "cloud_" + UUID.randomUUID().toString().substring(0, 8);
             }
@@ -334,8 +418,9 @@ public class AddCloudEngineBottomSheet {
             target.param = config.toParamJson();
             target.header = "";
 
-            saveEngineViaReflection(activity, target, existing != null);
-            Toast.makeText(activity, "已保存云引擎：" + target.name, Toast.LENGTH_SHORT).show();
+            saveEngineViaReflection(activity, target);
+            ensureDefaultSpeakerViaReflection(target, config);
+            Toast.makeText(activity, "已保存云引擎并生成音色：" + target.name, Toast.LENGTH_SHORT).show();
             if (listener != null) {
                 listener.onSaved(target);
             }
@@ -354,23 +439,64 @@ public class AddCloudEngineBottomSheet {
         dialog.show();
     }
 
-    private static void sync(CloudTtsConfig config, EditText nameEdit, EditText urlEdit, EditText keyEdit, EditText modelEdit) {
+    private static void sync(
+            CloudTtsConfig config,
+            EditText nameEdit,
+            EditText urlEdit,
+            EditText keyEdit,
+            EditText secretKeyEdit,
+            EditText appIdEdit,
+            EditText regionEdit,
+            EditText modelEdit,
+            EditText voiceEdit,
+            EditText instructionsEdit) {
         config.name = nameEdit.getText().toString().trim();
         config.baseUrl = urlEdit.getText().toString().trim();
         config.apiKey = keyEdit.getText().toString().trim();
+        config.secretKey = secretKeyEdit.getText().toString().trim();
+        config.appId = appIdEdit.getText().toString().trim();
+        config.region = regionEdit.getText().toString().trim();
+        config.instructions = instructionsEdit.getText().toString().trim();
         if (config.providerType != CloudTtsProviderType.MIMO) {
             String m = modelEdit.getText().toString().trim();
             config.model = TextUtils.isEmpty(m) ? config.providerType.defaultModel : m;
         }
+        String v = voiceEdit.getText().toString().trim();
+        config.voice = TextUtils.isEmpty(v) ? config.providerType.defaultVoice : v;
     }
 
-    private static void saveEngineViaReflection(Activity activity, Engine target, boolean isUpdate) {
+    private static void saveEngineViaReflection(Activity activity, Engine target) {
         try {
             Class<?> helper = Class.forName("K6.d");
             Method saveMethod = helper.getMethod("l", Engine.class);
             saveMethod.invoke(null, target);
         } catch (Throwable t) {
             Toast.makeText(activity, "保存失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private static void ensureDefaultSpeakerViaReflection(Engine target, CloudTtsConfig config) {
+        try {
+            Speaker sp = new Speaker();
+            sp.id = "sp_" + target.code;
+            sp.code = target.code;
+            sp.group = target.code;
+            sp.name = target.name;
+            sp.locale = "zh-CN";
+            sp.sampleRate = 24000;
+            sp.type = 0;
+            sp.speed = 1.0f;
+            sp.pitch = 1.0f;
+            sp.volume = 1.0f;
+            boolean isCloneOrDesign = config.providerType == CloudTtsProviderType.MIMO
+                    && ("mimo-v2.5-tts-voiceclone".equalsIgnoreCase(config.model)
+                        || "mimo-v2.5-tts-voicedesign".equalsIgnoreCase(config.model));
+            sp.param = isCloneOrDesign ? "" : (config.voice != null ? config.voice : "");
+
+            Class<?> qc = Class.forName("Q6.c");
+            Method saveSpeaker = qc.getMethod("Y", Speaker.class);
+            saveSpeaker.invoke(null, sp);
+        } catch (Throwable ignored) {
         }
     }
 

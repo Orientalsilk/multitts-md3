@@ -1,6 +1,7 @@
 package org.nobody.multitts.cloud;
 
 import android.text.TextUtils;
+import java.util.Locale;
 import org.json.JSONObject;
 import org.nobody.multitts.tts.engine.Engine;
 
@@ -24,10 +25,40 @@ public class CloudTtsConfig {
 
     public String effectiveBaseUrl() {
         String raw = !TextUtils.isEmpty(baseUrl) ? baseUrl.trim() : providerType.defaultBaseUrl;
+        int commaIdx = raw.indexOf(",={");
+        if (commaIdx > 0) {
+            raw = raw.substring(0, commaIdx).trim();
+        }
         while (raw.endsWith("/")) {
             raw = raw.substring(0, raw.length() - 1);
         }
         return raw;
+    }
+
+    private static CloudTtsProviderType inferFromUrlOrName(String url, String name) {
+        String combined = ((url != null ? url : "") + " " + (name != null ? name : "")).toLowerCase(Locale.US);
+        if (combined.contains("fish.audio") || combined.contains("fish audio") || combined.contains("fishaudio")) {
+            return CloudTtsProviderType.FISHAUDIO;
+        }
+        if (combined.contains("xiaomimimo") || combined.contains("mimo")) {
+            return CloudTtsProviderType.MIMO;
+        }
+        if (combined.contains("generativelanguage") || combined.contains("gemini")) {
+            return CloudTtsProviderType.GEMINI;
+        }
+        if (combined.contains("speech.microsoft.com") || combined.contains("azure")) {
+            return CloudTtsProviderType.AZURE;
+        }
+        if (combined.contains("dashscope") || combined.contains("aliyuncs") || combined.contains("qwen") || combined.contains("alibaba")) {
+            return CloudTtsProviderType.ALIBABA;
+        }
+        if (combined.contains("polly") || combined.contains("amazonaws")) {
+            return CloudTtsProviderType.POLLY;
+        }
+        if (combined.contains("openspeech.bytedance") || combined.contains("volcengine") || combined.contains("volcano")) {
+            return CloudTtsProviderType.VOLCENGINE;
+        }
+        return null;
     }
 
     public static CloudTtsConfig fromEngine(Engine engine) {
@@ -36,6 +67,9 @@ public class CloudTtsConfig {
             return cfg;
         }
         CloudTtsProviderType matched = CloudTtsProviderType.fromEngineType(engine.type);
+        if (matched == null) {
+            matched = inferFromUrlOrName(engine.url, engine.name);
+        }
         if (matched != null) {
             cfg.providerType = matched;
             cfg.model = matched.defaultModel;
@@ -45,7 +79,12 @@ public class CloudTtsConfig {
             cfg.name = engine.name;
         }
         if (!TextUtils.isEmpty(engine.url)) {
-            cfg.baseUrl = engine.url;
+            String clean = engine.url.trim();
+            int commaIdx = clean.indexOf(",={");
+            if (commaIdx > 0) {
+                clean = clean.substring(0, commaIdx).trim();
+            }
+            cfg.baseUrl = clean;
         }
         if (!TextUtils.isEmpty(engine.param)) {
             try {

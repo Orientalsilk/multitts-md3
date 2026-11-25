@@ -10,6 +10,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import android.media.MediaCodec;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
@@ -767,6 +772,20 @@ public class CloudAiTtsEngine implements h {
             }
         }
 
+        boolean isWav = wavOrPcm.length >= 44
+                && wavOrPcm[0] == 'R' && wavOrPcm[1] == 'I'
+                && wavOrPcm[2] == 'F' && wavOrPcm[3] == 'F'
+                && wavOrPcm[8] == 'W' && wavOrPcm[9] == 'A'
+                && wavOrPcm[10] == 'V' && wavOrPcm[11] == 'E';
+        if (!isWav && context != null) {
+            int[] decodedRate = new int[] { sampleRate };
+            byte[] decodedPcm = decodeCompressedAudioToPcm(context, wavOrPcm, decodedRate);
+            if (decodedPcm != null && decodedPcm.length > 0) {
+                pcm = decodedPcm;
+                sampleRate = decodedRate[0];
+            }
+        }
+
         if (speaker != null && speaker.sampleRate != sampleRate) {
             speaker.sampleRate = sampleRate;
         }
@@ -778,6 +797,114 @@ public class CloudAiTtsEngine implements h {
             finishMethod.invoke(callback);
         } catch (Throwable t) {
             invokeCallbackError(callback, "Audio delivery failed: " + t.getMessage());
+        }
+    }
+
+    private static byte[] decodeCompressedAudioToPcm(Context ctx, byte[] encoded, int[] outSampleRate) {
+        File tmp = null;
+        MediaExtractor extractor = new MediaExtractor();
+        MediaCodec codec = null;
+        try {
+            tmp = File.createTempFile("cloud_tts_", ".audio", ctx.getCacheDir());
+            try (FileOutputStream fos = new FileOutputStream(tmp)) {
+                fos.write(encoded);
+            }
+            extractor.setDataSource(tmp.getAbsolutePath());
+            int trackIndex = -1;
+            MediaFormat format = null;
+            for (int i = 0; i < extractor.getTrackCount(); i++) {
+                MediaFormat f = extractor.getTrackFormat(i);
+                String mime = f.getString(MediaFormat.KEY_MIME);
+                if (mime != null && mime.startsWith("audio/")) {
+                    trackIndex = i;
+                    format = f;
+                    break;
+                }
+            }
+            if (trackIndex < 0 || format == null) {
+                return null;
+            }
+            extractor.selectTrack(trackIndex);
+            String mime = format.getString(MediaFormat.KEY_MIME);
+            if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                outSampleRate[0] = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+            }
+            int channels = format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)
+                    ? format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    : 1;
+
+            codec = MediaCodec.createDecoderByType(mime);
+            codec.configure(format, null, null, 0);
+            codec.start();
+
+            ByteArrayOutputStream pcmOut = new ByteArrayOutputStream();
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            boolean inputDone = false;
+            boolean outputDone = false;
+            while (!outputDone) {
+                if (!inputDone) {
+                    int inIdx = codec.dequeueInputBuffer(10000);
+                    if (inIdx >= 0) {
+                        ByteBuffer inBuf = codec.getInputBuffer(inIdx);
+                        int sampleSize = inBuf != null ? extractor.readSampleData(inBuf, 0) : -1;
+                        if (sampleSize < 0) {
+                            codec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                            inputDone = true;
+                        } else {
+                            codec.queueInputBuffer(inIdx, 0, sampleSize, extractor.getSampleTime(), 0);
+                            extractor.advance();
+                        }
+                    }
+                }
+                int outIdx = codec.dequeueOutputBuffer(info, 10000);
+                if (outIdx >= 0) {
+                    ByteBuffer outBuf = codec.getOutputBuffer(outIdx);
+                    if (outBuf != null && info.size > 0) {
+                        byte[] chunk = new byte[info.size];
+                        outBuf.position(info.offset);
+                        outBuf.get(chunk);
+                        if (channels == 2) {
+                            for (int i = 0; i + 3 < chunk.length; i += 4) {
+                                pcmOut.write(chunk[i]);
+                                pcmOut.write(chunk[i + 1]);
+                            }
+                        } else {
+                            pcmOut.write(chunk);
+                        }
+                    }
+                    codec.releaseOutputBuffer(outIdx, false);
+                    if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        outputDone = true;
+                    }
+                } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    MediaFormat outFmt = codec.getOutputFormat();
+                    if (outFmt.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                        outSampleRate[0] = outFmt.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                    }
+                    if (outFmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                        channels = outFmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                    }
+                }
+            }
+            return pcmOut.toByteArray();
+        } catch (Throwable ignored) {
+            return null;
+        } finally {
+            if (codec != null) {
+                try {
+                    codec.stop();
+                    codec.release();
+                } catch (Throwable ignored) {
+                }
+            }
+            try {
+                extractor.release();
+            } catch (Throwable ignored) {
+            }
+            if (tmp != null) {
+                //noinspection ResultOfMethodCallIgnored
+                tmp.delete();
+            }
         }
     }
 }
