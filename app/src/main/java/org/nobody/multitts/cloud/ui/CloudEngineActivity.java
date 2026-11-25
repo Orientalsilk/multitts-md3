@@ -452,7 +452,15 @@ public class CloudEngineActivity extends Activity {
                 db.getClass().getMethod("close").invoke(db);
             } catch (Throwable ignored) {
             }
-            Toast.makeText(this, "已删除：" + e.name, Toast.LENGTH_SHORT).show();
+            try {
+                Class.forName("Q6.c").getMethod("a0", String.class, List.class).invoke(null, e.code, Collections.emptyList());
+            } catch (Throwable ignored) {
+            }
+            try {
+                Class.forName("Z6.o").getMethod("d").invoke(null);
+            } catch (Throwable ignored) {
+            }
+            Toast.makeText(this, "已删除并刷新顶栏：" + e.name, Toast.LENGTH_SHORT).show();
         } catch (Throwable t) {
             Toast.makeText(this, "删除失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
         }
