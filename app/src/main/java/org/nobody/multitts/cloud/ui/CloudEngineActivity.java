@@ -194,6 +194,66 @@ public class CloudEngineActivity extends Activity {
 
         setContentView(root);
         reloadContent();
+        migrateLegacyHugeAudioAsync();
+    }
+
+    private void migrateLegacyHugeAudioAsync() {
+        new Thread(() -> {
+            try {
+                java.io.File dir = new java.io.File(getFilesDir(), "cloud_clone_audio");
+                List<Engine> all = loadEnginesViaReflection();
+                boolean changedAny = false;
+                for (Engine e : all) {
+                    if (!CloudTtsProviderType.isCloudType(e.type)) continue;
+                    CloudTtsConfig cfg = CloudTtsConfig.fromEngine(e);
+                    if (!TextUtils.isEmpty(cfg.referenceAudioBase64)
+                            && !cfg.referenceAudioBase64.startsWith("cloud_file:")
+                            && (cfg.referenceAudioBase64.startsWith("data:audio/") || cfg.referenceAudioBase64.length() > 512)) {
+                        if (!dir.exists()) dir.mkdirs();
+                        String fname = "mig_eng_" + java.util.UUID.randomUUID().toString().substring(0, 8) + ".txt";
+                        try (java.io.FileOutputStream fos = new java.io.FileOutputStream(new java.io.File(dir, fname))) {
+                            fos.write(cfg.referenceAudioBase64.getBytes("UTF-8"));
+                        }
+                        cfg.referenceAudioBase64 = "cloud_file:" + fname;
+                        e.param = cfg.toParamJson();
+                        try {
+                            Class.forName("K6.d").getMethod("l", Engine.class).invoke(null, e);
+                            changedAny = true;
+                        } catch (Throwable ignored) {}
+                    }
+                    List<Speaker> spList = loadSpeakersForGroupViaReflection(e.code);
+                    boolean spChanged = false;
+                    List<Speaker> updatedList = new ArrayList<>();
+                    for (Speaker sp : spList) {
+                        if (!TextUtils.isEmpty(sp.param)
+                                && !sp.param.startsWith("cloud_file:")
+                                && (sp.param.startsWith("data:audio/") || sp.param.length() > 512)) {
+                            if (!dir.exists()) dir.mkdirs();
+                            String fname = "mig_sp_" + java.util.UUID.randomUUID().toString().substring(0, 8) + ".txt";
+                            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(new java.io.File(dir, fname))) {
+                                fos.write(sp.param.getBytes("UTF-8"));
+                            }
+                            sp.param = "cloud_file:" + fname;
+                            spChanged = true;
+                        }
+                        updatedList.add(sp);
+                    }
+                    if (spChanged) {
+                        try {
+                            Class<?> qc = Class.forName("Q6.c");
+                            qc.getMethod("a0", String.class, List.class).invoke(null, e.code, updatedList);
+                            qc.getMethod("Z").invoke(null);
+                            changedAny = true;
+                        } catch (Throwable ignored) {}
+                    }
+                }
+                if (changedAny) {
+                    try { Class.forName("Z6.o").getMethod("d").invoke(null); } catch (Throwable ignored) {}
+                    try { Class.forName("R6.i").getMethod("e").invoke(null); } catch (Throwable ignored) {}
+                    runOnUiThread(this::reloadContent);
+                }
+            } catch (Throwable ignored) {}
+        }).start();
     }
 
     @Override
