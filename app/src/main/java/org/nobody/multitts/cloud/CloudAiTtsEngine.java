@@ -109,8 +109,10 @@ public class CloudAiTtsEngine implements h {
         String engineKey = engine != null && !TextUtils.isEmpty(engine.code)
                 ? engine.code
                 : config.providerType.engineType;
+        boolean acquired = false;
         try {
             SynthesisLimiter.acquire(engineKey, config.maxConcurrency);
+            acquired = true;
             if (cancelled) {
                 return;
             }
@@ -129,7 +131,9 @@ public class CloudAiTtsEngine implements h {
                 invokeCallbackError(callback, e.getMessage() != null ? e.getMessage() : "Cloud TTS Error");
             }
         } finally {
-            SynthesisLimiter.release(engineKey);
+            if (acquired) {
+                SynthesisLimiter.release(engineKey);
+            }
         }
     }
 

@@ -1,17 +1,22 @@
 package org.nobody.multitts.cloud.ui;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
@@ -38,65 +43,108 @@ public class CloudEngineActivity extends Activity {
     private TextView tabEngine;
     private TextView fab;
     private boolean showingVoices = false;
+    private AudioTrack activeTrack;
+    private boolean isNight = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        isNight = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                == Configuration.UI_MODE_NIGHT_YES;
+
+        Window win = getWindow();
+        if (win != null) {
+            win.setStatusBarColor(cSurface());
+            win.setNavigationBarColor(cSurface());
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                View decor = win.getDecorView();
+                int flags = decor.getSystemUiVisibility();
+                if (!isNight) {
+                    flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                } else {
+                    flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                }
+                decor.setSystemUiVisibility(flags);
+            }
+        }
 
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.parseColor("#F6F7F2"));
+        root.setBackgroundColor(cSurface());
         root.setFitsSystemWindows(true);
 
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(LinearLayout.VERTICAL);
-        main.setPadding(dp(16), dp(14), dp(16), dp(80));
 
+        // Top App Bar
         LinearLayout topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setPadding(dp(12), dp(10), dp(16), dp(8));
 
         TextView back = new TextView(this);
         back.setText("←");
-        back.setTextSize(22);
-        back.setTextColor(Color.parseColor("#1B1C18"));
-        back.setPadding(dp(4), dp(4), dp(16), dp(4));
+        back.setTextSize(20);
+        back.setGravity(Gravity.CENTER);
+        back.setTextColor(cTextPrimary());
+        GradientDrawable backBg = new GradientDrawable();
+        backBg.setShape(GradientDrawable.OVAL);
+        backBg.setColor(cCard());
+        back.setBackground(backBg);
         back.setOnClickListener(v -> finish());
-        topBar.addView(back);
+        LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(dp(38), dp(38));
+        backLp.rightMargin = dp(12);
+        topBar.addView(back, backLp);
 
         TextView title = new TextView(this);
         title.setText("朗读引擎与音色");
-        title.setTextSize(22);
-        title.setTextColor(Color.parseColor("#1B1C18"));
+        title.setTextSize(20);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(cTextPrimary());
         topBar.addView(title);
         main.addView(topBar);
 
-        LinearLayout tabs = new LinearLayout(this);
-        tabs.setOrientation(LinearLayout.HORIZONTAL);
-        tabs.setPadding(0, dp(14), 0, dp(10));
+        // Segmented Pill Tab Bar
+        LinearLayout tabWrap = new LinearLayout(this);
+        tabWrap.setOrientation(LinearLayout.HORIZONTAL);
+        tabWrap.setPadding(dp(4), dp(4), dp(4), dp(4));
+        GradientDrawable tabTrackBg = new GradientDrawable();
+        tabTrackBg.setColor(cCard());
+        tabTrackBg.setCornerRadius(dp(16));
+        tabWrap.setBackground(tabTrackBg);
+
         tabVoice = makeTab("音色", false);
         tabEngine = makeTab("引擎", true);
         tabVoice.setOnClickListener(v -> {
-            showingVoices = true;
-            updateTabStyles();
-            reloadContent();
+            if (!showingVoices) {
+                showingVoices = true;
+                updateTabStyles();
+                reloadContent();
+            }
         });
         tabEngine.setOnClickListener(v -> {
-            showingVoices = false;
-            updateTabStyles();
-            reloadContent();
+            if (showingVoices) {
+                showingVoices = false;
+                updateTabStyles();
+                reloadContent();
+            }
         });
-        tabs.addView(tabVoice, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        tabs.addView(tabEngine, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        main.addView(tabs);
+        tabWrap.addView(tabVoice, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        tabWrap.addView(tabEngine, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        LinearLayout.LayoutParams tabWrapLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tabWrapLp.setMargins(dp(16), dp(4), dp(16), dp(10));
+        main.addView(tabWrap, tabWrapLp);
 
         View divider = new View(this);
-        divider.setBackgroundColor(Color.parseColor("#E0E4D8"));
+        divider.setBackgroundColor(cDivider());
         main.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
 
         ScrollView scroll = new ScrollView(this);
+        scroll.setClipToPadding(false);
         listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
-        listContainer.setPadding(0, dp(12), 0, dp(16));
+        listContainer.setPadding(dp(16), dp(10), dp(16), dp(88));
         scroll.addView(listContainer);
         main.addView(scroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -104,14 +152,19 @@ public class CloudEngineActivity extends Activity {
         root.addView(main);
 
         fab = new TextView(this);
-        fab.setText("+");
-        fab.setTextSize(26);
-        fab.setTextColor(Color.parseColor("#2A3B17"));
+        fab.setText("+ 添加引擎");
+        fab.setTextSize(14);
+        fab.setTypeface(Typeface.DEFAULT_BOLD);
+        fab.setTextColor(cOnPrimaryContainer());
         fab.setGravity(Gravity.CENTER);
+        fab.setPadding(dp(18), dp(14), dp(18), dp(14));
         GradientDrawable fabBg = new GradientDrawable();
-        fabBg.setColor(Color.parseColor("#DCE6CF"));
-        fabBg.setCornerRadius(dp(18));
+        fabBg.setColor(cPrimaryContainer());
+        fabBg.setCornerRadius(dp(16));
         fab.setBackground(fabBg);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            fab.setElevation(dp(4));
+        }
         fab.setOnClickListener(v -> {
             PopupMenu menu = new PopupMenu(this, fab);
             CloudTtsProviderType[] values = CloudTtsProviderType.values();
@@ -126,7 +179,8 @@ public class CloudEngineActivity extends Activity {
             menu.show();
         });
 
-        FrameLayout.LayoutParams fabLp = new FrameLayout.LayoutParams(dp(56), dp(56));
+        FrameLayout.LayoutParams fabLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         fabLp.gravity = Gravity.BOTTOM | Gravity.END;
         fabLp.rightMargin = dp(20);
         fabLp.bottomMargin = dp(24);
@@ -134,6 +188,24 @@ public class CloudEngineActivity extends Activity {
 
         setContentView(root);
         reloadContent();
+    }
+
+    @Override
+    protected void onDestroy() {
+        stopActiveTrack();
+        super.onDestroy();
+    }
+
+    private void stopActiveTrack() {
+        if (activeTrack != null) {
+            try {
+                activeTrack.stop();
+            } catch (Throwable ignored) {}
+            try {
+                activeTrack.release();
+            } catch (Throwable ignored) {}
+            activeTrack = null;
+        }
     }
 
     private void updateTabStyles() {
@@ -145,11 +217,12 @@ public class CloudEngineActivity extends Activity {
     }
 
     private void applyTabStyle(TextView tv, boolean active) {
-        tv.setTextColor(Color.parseColor(active ? "#4B662C" : "#6B7066"));
+        tv.setTextColor(active ? cOnPrimaryContainer() : cTextSecondary());
+        tv.setTypeface(active ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
         if (active) {
             GradientDrawable bg = new GradientDrawable();
-            bg.setColor(Color.parseColor("#E6ECD9"));
-            bg.setCornerRadius(dp(14));
+            bg.setColor(cPrimaryContainer());
+            bg.setCornerRadius(dp(12));
             tv.setBackground(bg);
         } else {
             tv.setBackground(null);
@@ -170,10 +243,9 @@ public class CloudEngineActivity extends Activity {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private void reloadVoices() {
         listContainer.removeAllViews();
-        addHint("点引擎右侧「+ 添加音色」可为同一引擎挂载多个音色；回到主界面下拉列表或重启即可同步顶栏分页。");
+        addBannerHint("点引擎右侧「+ 添加音色」可挂载多个音色；回到主界面下拉列表或重启即可同步顶栏。");
         List<Engine> all = loadEnginesViaReflection();
         int totalSpeakers = 0;
         for (Engine e : all) {
@@ -182,10 +254,12 @@ public class CloudEngineActivity extends Activity {
             }
             List<Speaker> speakers = loadSpeakersForGroupViaReflection(e.code);
             CloudTtsProviderType pt = CloudTtsProviderType.fromEngineType(e.type);
-            addVoiceGroupHeader(e, (!TextUtils.isEmpty(e.name) ? e.name : e.code)
-                    + " · " + (pt != null ? pt.displayName : e.type));
+            String title = (!TextUtils.isEmpty(e.name) ? e.name : e.code)
+                    + " · " + (pt != null ? pt.displayName : e.type)
+                    + " (" + speakers.size() + ")";
+            addVoiceGroupHeader(e, title);
             if (speakers.isEmpty()) {
-                addHint("暂无音色，请切回「引擎」标签点 ✎ 重新保存一次即可生成");
+                addHint("暂无音色，点右上角「+ 添加音色」即可添加");
             } else {
                 for (Speaker sp : speakers) {
                     totalSpeakers++;
@@ -194,77 +268,91 @@ public class CloudEngineActivity extends Activity {
             }
         }
         if (totalSpeakers == 0) {
-            addHint("暂无已生成的云端音色，请先在「引擎」标签添加并保存云引擎。");
+            addHint("暂无已生成的云端音色，请先切换到「引擎」标签添加并保存云引擎。");
         }
     }
 
     private void addSpeakerCard(Engine engine, Speaker sp) {
         LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#EAECE4"));
-        bg.setCornerRadius(dp(18));
+        bg.setColor(cCard());
+        bg.setCornerRadius(dp(16));
         card.setBackground(bg);
-        card.setPadding(dp(16), dp(14), dp(12), dp(14));
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
 
         LinearLayout textCol = new LinearLayout(this);
         textCol.setOrientation(LinearLayout.VERTICAL);
         TextView nameTv = new TextView(this);
         nameTv.setText(!TextUtils.isEmpty(sp.name) ? sp.name : sp.id);
-        nameTv.setTextSize(16);
-        nameTv.setTextColor(Color.parseColor("#1B1C18"));
+        nameTv.setTextSize(15);
+        nameTv.setTypeface(Typeface.DEFAULT_BOLD);
+        nameTv.setTextColor(cTextPrimary());
+        nameTv.setSingleLine(true);
+        nameTv.setEllipsize(TextUtils.TruncateAt.END);
+
         TextView subTv = new TextView(this);
         CloudTtsConfig cfg = CloudTtsConfig.fromEngine(engine);
         boolean isCloneCard = cfg.providerType == CloudTtsProviderType.MIMO
-                && "mimo-v2.5-tts-voiceclone".equalsIgnoreCase(cfg.model);
+                && "mimo-v2.5-tts-voiceclone".equalsIgnoreCase(cfg.model != null ? cfg.model.trim() : "");
         String voiceInfo;
         if (isCloneCard) {
             String cloneLabel = (!TextUtils.isEmpty(sp.code) && !sp.code.equals(engine.code))
                     ? sp.code
                     : (!TextUtils.isEmpty(cfg.referenceAudioName) ? cfg.referenceAudioName : "已配置参考音频");
-            voiceInfo = "克隆：" + cloneLabel;
+            voiceInfo = "克隆 · " + cloneLabel;
         } else {
-            voiceInfo = !TextUtils.isEmpty(sp.param) ? sp.param
-                    : (!TextUtils.isEmpty(sp.code) ? sp.code : cfg.model);
+            String rawCode = !TextUtils.isEmpty(sp.code) && !sp.code.equals(engine.code) ? sp.code : sp.param;
+            voiceInfo = !TextUtils.isEmpty(rawCode) ? rawCode : cfg.model;
         }
         subTv.setText(cfg.model + " · " + voiceInfo);
         subTv.setTextSize(12);
-        subTv.setTextColor(Color.parseColor("#5C6057"));
+        subTv.setTextColor(cTextSecondary());
+        subTv.setSingleLine(true);
+        subTv.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        subTv.setPadding(0, dp(2), 0, 0);
+
         textCol.addView(nameTv);
         textCol.addView(subTv);
-        card.addView(textCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        topRow.addView(textCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView playBtn = new TextView(this);
-        playBtn.setText("试听");
-        playBtn.setTextSize(13);
-        playBtn.setTextColor(Color.parseColor("#2A3B17"));
-        GradientDrawable playBg = new GradientDrawable();
-        playBg.setColor(Color.parseColor("#DCE6CF"));
-        playBg.setCornerRadius(dp(12));
-        playBtn.setBackground(playBg);
-        playBtn.setPadding(dp(12), dp(6), dp(12), dp(6));
+        TextView playBtn = makeChip("试听", cPrimaryContainer(), cOnPrimaryContainer());
         playBtn.setOnClickListener(v -> auditionSpeaker(engine, sp, playBtn));
-        card.addView(playBtn);
+        LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        playLp.leftMargin = dp(8);
+        topRow.addView(playBtn, playLp);
 
-        TextView editSpBtn = new TextView(this);
-        editSpBtn.setText("✎");
-        editSpBtn.setTextSize(17);
-        editSpBtn.setTextColor(Color.parseColor("#3E4239"));
-        editSpBtn.setPadding(dp(10), dp(6), dp(6), dp(6));
+        card.addView(topRow);
+
+        // Action row aligned cleanly at bottom right
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.END);
+        actionRow.setPadding(0, dp(10), 0, 0);
+
+        TextView editSpBtn = makeChip("编辑", cCardHigh(), cTextPrimary());
         editSpBtn.setOnClickListener(v -> AddCloudEngineBottomSheet.showSpeakerDialog(this, engine, sp, this::reloadVoices));
-        card.addView(editSpBtn);
+        actionRow.addView(editSpBtn);
 
-        TextView delSpBtn = new TextView(this);
-        delSpBtn.setText("🗑");
-        delSpBtn.setTextSize(16);
-        delSpBtn.setTextColor(Color.parseColor("#3E4239"));
-        delSpBtn.setPadding(dp(6), dp(6), dp(4), dp(6));
-        delSpBtn.setOnClickListener(v -> {
-            deleteSingleSpeakerViaReflection(engine, sp);
-            reloadVoices();
-        });
-        card.addView(delSpBtn);
+        TextView delSpBtn = makeChip("删除", cErrorContainer(), cOnErrorContainer());
+        delSpBtn.setOnClickListener(v -> confirmDelete(
+                "删除音色",
+                "确定要删除音色「" + (!TextUtils.isEmpty(sp.name) ? sp.name : sp.id) + "」吗？",
+                () -> {
+                    deleteSingleSpeakerViaReflection(engine, sp);
+                    reloadVoices();
+                }));
+        LinearLayout.LayoutParams delLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        delLp.leftMargin = dp(8);
+        actionRow.addView(delSpBtn, delLp);
+
+        card.addView(actionRow);
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -274,7 +362,7 @@ public class CloudEngineActivity extends Activity {
 
     private void auditionSpeaker(Engine engine, Speaker sp, TextView btn) {
         btn.setEnabled(false);
-        btn.setText("合成中");
+        btn.setText("合成中...");
         new Thread(() -> {
             try {
                 CloudAiTtsEngine tts = new CloudAiTtsEngine(this, engine, sp);
@@ -297,17 +385,20 @@ public class CloudEngineActivity extends Activity {
         }).start();
     }
 
-    private static void playWavBytes(byte[] wav) {
+    private void playWavBytes(byte[] wav) {
         if (wav == null || wav.length < 44) {
             return;
         }
+        stopActiveTrack();
         ByteBuffer bb = ByteBuffer.wrap(wav).order(ByteOrder.LITTLE_ENDIAN);
+        int channels = bb.getShort(22) & 0xFFFF;
         int sampleRate = bb.getInt(24);
         if (sampleRate < 8000 || sampleRate > 96000) {
             sampleRate = 24000;
         }
+        int channelMask = (channels == 2) ? AudioFormat.CHANNEL_OUT_STEREO : AudioFormat.CHANNEL_OUT_MONO;
         byte[] pcm = Arrays.copyOfRange(wav, 44, wav.length);
-        int minBuf = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        int minBuf = AudioTrack.getMinBufferSize(sampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT);
         AudioTrack track = new AudioTrack.Builder()
                 .setAudioAttributes(new AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -316,13 +407,20 @@ public class CloudEngineActivity extends Activity {
                 .setAudioFormat(new AudioFormat.Builder()
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                         .setSampleRate(sampleRate)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .setChannelMask(channelMask)
                         .build())
                 .setBufferSizeInBytes(Math.max(minBuf, pcm.length))
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .build();
+        activeTrack = track;
         track.write(pcm, 0, pcm.length);
         track.play();
+    }
+
+    private static boolean isHttpEngine(Engine e) {
+        if (e == null) return false;
+        if ("http".equalsIgnoreCase(e.type)) return true;
+        return e.code != null && e.code.startsWith("http_");
     }
 
     private void reloadEngines() {
@@ -330,30 +428,44 @@ public class CloudEngineActivity extends Activity {
         List<Engine> all = loadEnginesViaReflection();
         List<Engine> cloudList = new ArrayList<>();
         List<Engine> httpList = new ArrayList<>();
+        List<Engine> innerList = new ArrayList<>();
         for (Engine e : all) {
             if (CloudTtsProviderType.isCloudType(e.type)) {
                 cloudList.add(e);
-            } else {
+            } else if (isHttpEngine(e)) {
                 httpList.add(e);
+            } else {
+                innerList.add(e);
             }
         }
 
-        addHeader("云 TTS");
+        addHeader("云端 AI TTS (" + cloudList.size() + ")");
         if (cloudList.isEmpty()) {
-            addHint("暂无云端 AI 引擎，点击右下角 + 添加（OpenAI / Gemini / MiMo / Fish Audio 等）");
+            addHint("暂无云端 AI 引擎，点击右下角「+ 添加引擎」开始配置");
         } else {
             for (Engine e : cloudList) {
                 CloudTtsProviderType pt = CloudTtsProviderType.fromEngineType(e.type);
-                addEngineCard(e, pt != null ? pt.displayName : e.type);
+                CloudTtsConfig cfg = CloudTtsConfig.fromEngine(e);
+                String sub = (pt != null ? pt.displayName : e.type) + " · " + cfg.model;
+                addEngineCard(e, sub, true, true);
             }
         }
 
-        addHeader("HTTP 协议 TTS");
+        addHeader("HTTP 协议 TTS (" + httpList.size() + ")");
         if (httpList.isEmpty()) {
             addHint("暂无 HTTP TTS 引擎");
         } else {
             for (Engine e : httpList) {
-                addEngineCard(e, "HTTP TTS");
+                String urlHost = !TextUtils.isEmpty(e.url) ? e.url : ("HTTP 引擎 · " + e.code);
+                addEngineCard(e, urlHost, false, true);
+            }
+        }
+
+        if (!innerList.isEmpty()) {
+            addHeader("内置 / 离线引擎 (" + innerList.size() + ")");
+            for (Engine e : innerList) {
+                String sub = (!TextUtils.isEmpty(e.type) ? e.type : "inner") + " · " + e.code;
+                addEngineCard(e, sub, false, false);
             }
         }
     }
@@ -362,30 +474,27 @@ public class CloudEngineActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(4), dp(14), dp(4), dp(6));
+        row.setPadding(dp(2), dp(14), dp(2), dp(8));
 
         TextView tv = new TextView(this);
         tv.setText(titleText);
         tv.setTextSize(13);
-        tv.setTextColor(Color.parseColor("#5C6057"));
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setTextColor(cTextSecondary());
+        tv.setSingleLine(true);
+        tv.setEllipsize(TextUtils.TruncateAt.END);
         row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView addBtn = new TextView(this);
-        addBtn.setText("+ 添加音色");
-        addBtn.setTextSize(12);
-        addBtn.setTextColor(Color.parseColor("#2A3B17"));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#DCE6CF"));
-        bg.setCornerRadius(dp(10));
-        addBtn.setBackground(bg);
-        addBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
+        TextView addBtn = makeChip("+ 添加音色", cPrimaryContainer(), cOnPrimaryContainer());
         addBtn.setOnClickListener(v -> AddCloudEngineBottomSheet.showSpeakerDialog(this, engine, null, this::reloadVoices));
-        row.addView(addBtn);
+        LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        addLp.leftMargin = dp(8);
+        row.addView(addBtn, addLp);
 
         listContainer.addView(row);
     }
 
-    @SuppressWarnings("unchecked")
     private void deleteSingleSpeakerViaReflection(Engine engine, Speaker targetSp) {
         try {
             Class<?> qc = Class.forName("Q6.c");
@@ -415,62 +524,97 @@ public class CloudEngineActivity extends Activity {
         TextView tv = new TextView(this);
         tv.setText(text);
         tv.setTextSize(13);
-        tv.setTextColor(Color.parseColor("#5C6057"));
-        tv.setPadding(dp(4), dp(14), dp(4), dp(6));
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setTextColor(cTextSecondary());
+        tv.setPadding(dp(2), dp(14), dp(2), dp(8));
         listContainer.addView(tv);
+    }
+
+    private void addBannerHint(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(12);
+        tv.setTextColor(cOnPrimaryContainer());
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(cPrimaryContainer());
+        bg.setAlpha(isNight ? 180 : 140);
+        bg.setCornerRadius(dp(12));
+        tv.setBackground(bg);
+        tv.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(6);
+        listContainer.addView(tv, lp);
     }
 
     private void addHint(String text) {
         TextView tv = new TextView(this);
         tv.setText(text);
         tv.setTextSize(13);
-        tv.setTextColor(Color.parseColor("#757970"));
-        tv.setPadding(dp(8), dp(8), dp(8), dp(8));
+        tv.setTextColor(cTextSecondary());
+        tv.setPadding(dp(4), dp(6), dp(4), dp(8));
         listContainer.addView(tv);
     }
 
-    private void addEngineCard(Engine e, String subtitle) {
+    private void addEngineCard(Engine e, String subtitle, boolean isCloud, boolean allowDelete) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#EAECE4"));
-        bg.setCornerRadius(dp(18));
+        bg.setColor(cCard());
+        bg.setCornerRadius(dp(16));
         card.setBackground(bg);
-        card.setPadding(dp(16), dp(14), dp(12), dp(14));
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
 
         LinearLayout textCol = new LinearLayout(this);
         textCol.setOrientation(LinearLayout.VERTICAL);
         TextView nameTv = new TextView(this);
         nameTv.setText(!TextUtils.isEmpty(e.name) ? e.name : e.code);
-        nameTv.setTextSize(16);
-        nameTv.setTextColor(Color.parseColor("#1B1C18"));
+        nameTv.setTextSize(15);
+        nameTv.setTypeface(Typeface.DEFAULT_BOLD);
+        nameTv.setTextColor(cTextPrimary());
+        nameTv.setSingleLine(true);
+        nameTv.setEllipsize(TextUtils.TruncateAt.END);
+
         TextView subTv = new TextView(this);
         subTv.setText(subtitle);
-        subTv.setTextSize(13);
-        subTv.setTextColor(Color.parseColor("#5C6057"));
+        subTv.setTextSize(12);
+        subTv.setTextColor(cTextSecondary());
+        subTv.setSingleLine(true);
+        subTv.setEllipsize(TextUtils.TruncateAt.END);
+        subTv.setPadding(0, dp(2), 0, 0);
+
         textCol.addView(nameTv);
         textCol.addView(subTv);
         card.addView(textCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView editBtn = new TextView(this);
-        editBtn.setText("✎");
-        editBtn.setTextSize(18);
-        editBtn.setTextColor(Color.parseColor("#3E4239"));
-        editBtn.setPadding(dp(10), dp(6), dp(10), dp(6));
-        editBtn.setOnClickListener(v -> AddCloudEngineBottomSheet.show(this, e, saved -> reloadContent()));
-        card.addView(editBtn);
-
-        TextView delBtn = new TextView(this);
-        delBtn.setText("🗑");
-        delBtn.setTextSize(17);
-        delBtn.setTextColor(Color.parseColor("#3E4239"));
-        delBtn.setPadding(dp(8), dp(6), dp(8), dp(6));
-        delBtn.setOnClickListener(v -> {
-            deleteEngineViaReflection(e);
-            reloadContent();
+        TextView editBtn = makeChip(isCloud ? "编辑" : "详情", cCardHigh(), cTextPrimary());
+        editBtn.setOnClickListener(v -> {
+            if (isCloud) {
+                AddCloudEngineBottomSheet.show(this, e, saved -> reloadContent());
+            } else {
+                showHttpEngineInfo(e);
+            }
         });
-        card.addView(delBtn);
+        LinearLayout.LayoutParams editLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        editLp.leftMargin = dp(8);
+        card.addView(editBtn, editLp);
+
+        if (allowDelete) {
+            TextView delBtn = makeChip("删除", cErrorContainer(), cOnErrorContainer());
+            delBtn.setOnClickListener(v -> confirmDelete(
+                    "删除引擎",
+                    "确定要删除「" + (!TextUtils.isEmpty(e.name) ? e.name : e.code) + "」及其关联音色吗？",
+                    () -> {
+                        deleteEngineViaReflection(e);
+                        reloadContent();
+                    }));
+            LinearLayout.LayoutParams delLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            delLp.leftMargin = dp(6);
+            card.addView(delBtn, delLp);
+        }
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -478,12 +622,48 @@ public class CloudEngineActivity extends Activity {
         listContainer.addView(card, lp);
     }
 
+    private void showHttpEngineInfo(Engine e) {
+        boolean isHttp = isHttpEngine(e);
+        String msg = "名称：" + (!TextUtils.isEmpty(e.name) ? e.name : e.code)
+                + "\n类型：" + (!TextUtils.isEmpty(e.type) ? e.type : "inner")
+                + "\n代号：" + e.code
+                + (isHttp ? "\n接口：" + (!TextUtils.isEmpty(e.url) ? e.url : "(HTTP 脚本)") : "");
+        new AlertDialog.Builder(this)
+                .setTitle(isHttp ? "HTTP 协议 TTS 详情" : "内置 / 离线引擎详情")
+                .setMessage(msg)
+                .setPositiveButton("关闭", null)
+                .show();
+    }
+
+    private void confirmDelete(String title, String message, Runnable onConfirm) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删除", (d, w) -> onConfirm.run())
+                .show();
+    }
+
+    private TextView makeChip(String text, int bgColor, int fgColor) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(12);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setTextColor(fgColor);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(bgColor);
+        bg.setCornerRadius(dp(11));
+        tv.setBackground(bg);
+        tv.setPadding(dp(11), dp(6), dp(11), dp(6));
+        return tv;
+    }
+
     private TextView makeTab(String text, boolean active) {
         TextView tv = new TextView(this);
         tv.setText(text);
-        tv.setTextSize(15);
+        tv.setTextSize(14);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(0, dp(8), 0, dp(8));
+        tv.setPadding(0, dp(9), 0, dp(9));
         applyTabStyle(tv, active);
         return tv;
     }
@@ -536,9 +716,7 @@ public class CloudEngineActivity extends Activity {
             }
             try {
                 Class.forName("Q6.c").getMethod("a0", String.class, List.class).invoke(null, e.code, Collections.emptyList());
-            } catch (Throwable ignored) {}
-            try {
-                Class.forName("K6.d").getMethod("i", android.content.Context.class).invoke(null, getApplicationContext());
+                Class.forName("Q6.c").getMethod("Z").invoke(null);
             } catch (Throwable ignored) {}
             try {
                 Class.forName("Z6.o").getMethod("d").invoke(null);
@@ -551,6 +729,17 @@ public class CloudEngineActivity extends Activity {
             Toast.makeText(this, "删除失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
+
+    private int cSurface() { return Color.parseColor(isNight ? "#131511" : "#F6F7F2"); }
+    private int cCard() { return Color.parseColor(isNight ? "#1E211B" : "#EAECE4"); }
+    private int cCardHigh() { return Color.parseColor(isNight ? "#2A2E25" : "#DDE1D5"); }
+    private int cPrimaryContainer() { return Color.parseColor(isNight ? "#344B1E" : "#DCE6CF"); }
+    private int cOnPrimaryContainer() { return Color.parseColor(isNight ? "#DCE6CF" : "#2A3B17"); }
+    private int cErrorContainer() { return Color.parseColor(isNight ? "#4D2422" : "#F4DFDD"); }
+    private int cOnErrorContainer() { return Color.parseColor(isNight ? "#F5B8B3" : "#8C1D18"); }
+    private int cTextPrimary() { return Color.parseColor(isNight ? "#E4E6DE" : "#1B1C18"); }
+    private int cTextSecondary() { return Color.parseColor(isNight ? "#A3A89C" : "#5C6057"); }
+    private int cDivider() { return Color.parseColor(isNight ? "#2C3027" : "#E0E4D8"); }
 
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);

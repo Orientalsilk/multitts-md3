@@ -3,6 +3,7 @@ package org.nobody.multitts.cloud.ui;
 import android.app.Activity;
 import android.app.Dialog;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -192,7 +193,8 @@ public class AddCloudEngineBottomSheet {
 
         LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.parseColor("#F6F7F2"));
+        boolean night = isNight(activity);
+        root.setBackgroundColor(Color.parseColor(night ? "#131511" : "#F6F7F2"));
         root.setPadding(dp(activity, 20), dp(activity, 14), dp(activity, 20), dp(activity, 24));
 
         View handle = new View(activity);
@@ -208,7 +210,7 @@ public class AddCloudEngineBottomSheet {
         TextView title = new TextView(activity);
         title.setText("云端 AI 朗读引擎");
         title.setTextSize(20);
-        title.setTextColor(Color.parseColor("#1B1C18"));
+        title.setTextColor(Color.parseColor(isNight(activity) ? "#E4E6DE" : "#1B1C18"));
         title.setPadding(0, 0, 0, dp(activity, 14));
         root.addView(title);
 
@@ -267,17 +269,24 @@ public class AddCloudEngineBottomSheet {
         mimoCloneHint.setPadding(dp(activity, 4), dp(activity, 8), dp(activity, 4), dp(activity, 4));
         root.addView(mimoCloneHint);
 
-        Button testBtn = makePillButton(activity, "连接测试", "#DCE6CF", "#2A3B17");
-        root.addView(testBtn, lpMarginTop(activity, 16));
-
         TextView statusTv = new TextView(activity);
         statusTv.setTextSize(13);
-        statusTv.setPadding(dp(activity, 4), dp(activity, 8), dp(activity, 4), 0);
+        statusTv.setPadding(dp(activity, 4), dp(activity, 10), dp(activity, 4), 0);
         statusTv.setVisibility(View.GONE);
         root.addView(statusTv);
 
-        Button saveBtn = makePillButton(activity, "保存引擎并生成音色", "#4B662C", "#FFFFFF");
-        root.addView(saveBtn, lpMarginTop(activity, 14));
+        LinearLayout actionBar = new LinearLayout(activity);
+        actionBar.setOrientation(LinearLayout.HORIZONTAL);
+        Button testBtn = makePillButton(activity, "连接测试",
+                night ? "#344B1E" : "#DCE6CF", night ? "#DCE6CF" : "#2A3B17");
+        Button saveBtn = makePillButton(activity, "保存引擎",
+                night ? "#B4D08F" : "#4B662C", night ? "#1F310B" : "#FFFFFF");
+        LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        b1Lp.rightMargin = dp(activity, 10);
+        LinearLayout.LayoutParams b2Lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.4f);
+        actionBar.addView(testBtn, b1Lp);
+        actionBar.addView(saveBtn, b2Lp);
+        root.addView(actionBar, lpMarginTop(activity, 16));
 
         activeConfigRef = new WeakReference<>(config);
         activePickAudioBtnRef = new WeakReference<>(pickAudioBtn);
@@ -449,7 +458,7 @@ public class AddCloudEngineBottomSheet {
         if (win != null) {
             win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             win.setGravity(Gravity.BOTTOM);
-            win.setBackgroundDrawable(roundedBox(activity, "#F6F7F2"));
+            win.setBackgroundDrawable(sheetBg(activity));
         }
         dialog.show();
     }
@@ -545,14 +554,14 @@ public class AddCloudEngineBottomSheet {
                 if (existingList instanceof List<?>) {
                     for (Object o : (List<?>) existingList) {
                         if (o instanceof Speaker) {
-                            Speaker oldSp = (Speaker) o;
-                            if (!sp.id.equals(oldSp.id)) {
-                                list.add(oldSp);
-                            }
+                            list.add((Speaker) o);
                         }
                     }
                 }
             } catch (Throwable ignored) {
+            }
+            if (!list.isEmpty()) {
+                return list.size();
             }
             list.add(sp);
 
@@ -583,7 +592,7 @@ public class AddCloudEngineBottomSheet {
 
         LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.parseColor("#F6F7F2"));
+        root.setBackgroundColor(Color.parseColor(isNight(activity) ? "#131511" : "#F6F7F2"));
         root.setPadding(dp(activity, 20), dp(activity, 14), dp(activity, 20), dp(activity, 24));
 
         View handle = new View(activity);
@@ -599,7 +608,7 @@ public class AddCloudEngineBottomSheet {
         TextView title = new TextView(activity);
         title.setText((existingSp == null ? "添加音色 · " : "编辑音色 · ") + engine.name);
         title.setTextSize(19);
-        title.setTextColor(Color.parseColor("#1B1C18"));
+        title.setTextColor(Color.parseColor(isNight(activity) ? "#E4E6DE" : "#1B1C18"));
         title.setPadding(0, 0, 0, dp(activity, 12));
         root.addView(title);
 
@@ -761,16 +770,31 @@ public class AddCloudEngineBottomSheet {
                     }
                 }
 
-                boolean replaced = false;
-                for (int i = 0; i < list.size(); i++) {
-                    if (sp.id.equals(list.get(i).id)) {
-                        list.set(i, sp);
-                        replaced = true;
-                        break;
+                if (existingSp == null) {
+                    boolean collision = true;
+                    while (collision) {
+                        collision = false;
+                        for (Speaker sItem : list) {
+                            if (sp.id.equals(sItem.id)) {
+                                sp.id = sp.id + "_" + UUID.randomUUID().toString().substring(0, 4);
+                                collision = true;
+                                break;
+                            }
+                        }
                     }
-                }
-                if (!replaced) {
                     list.add(sp);
+                } else {
+                    boolean replaced = false;
+                    for (int i = 0; i < list.size(); i++) {
+                        if (sp.id.equals(list.get(i).id)) {
+                            list.set(i, sp);
+                            replaced = true;
+                            break;
+                        }
+                    }
+                    if (!replaced) {
+                        list.add(sp);
+                    }
                 }
 
                 qc.getMethod("a0", String.class, List.class).invoke(null, engine.code, list);
@@ -803,7 +827,7 @@ public class AddCloudEngineBottomSheet {
         if (win != null) {
             win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             win.setGravity(Gravity.BOTTOM);
-            win.setBackgroundDrawable(roundedBox(activity, "#F6F7F2"));
+            win.setBackgroundDrawable(sheetBg(activity));
         }
         dialog.show();
     }
@@ -815,15 +839,16 @@ public class AddCloudEngineBottomSheet {
         TextView tv = new TextView(activity);
         tv.setText(label);
         tv.setTextSize(12);
-        tv.setTextColor(Color.parseColor("#5C6057"));
+        boolean night = isNight(activity);
+        tv.setTextColor(Color.parseColor(night ? "#A3A89C" : "#5C6057"));
         wrap.addView(tv);
 
         EditText et = new EditText(activity);
         et.setText(val != null ? val : "");
         et.setTextSize(15);
-        et.setTextColor(Color.parseColor("#1B1C18"));
-        et.setBackground(roundedBox(activity, "#EAECE4"));
-        et.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
+        et.setTextColor(Color.parseColor(night ? "#E4E6DE" : "#1B1C18"));
+        et.setBackground(inputBox(activity));
+        et.setPadding(dp(activity, 14), dp(activity, 11), dp(activity, 14), dp(activity, 11));
         if (password) {
             et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         }
@@ -842,10 +867,32 @@ public class AddCloudEngineBottomSheet {
         return btn;
     }
 
+    private static boolean isNight(Activity activity) {
+        return (activity.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                == Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    private static GradientDrawable sheetBg(Activity activity) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(Color.parseColor(isNight(activity) ? "#131511" : "#F6F7F2"));
+        float r = dp(activity, 24);
+        d.setCornerRadii(new float[] { r, r, r, r, 0, 0, 0, 0 });
+        return d;
+    }
+
+    private static GradientDrawable inputBox(Activity activity) {
+        boolean night = isNight(activity);
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(Color.parseColor(night ? "#1E211B" : "#EAECE4"));
+        d.setCornerRadius(dp(activity, 12));
+        d.setStroke(dp(activity, 1), Color.parseColor(night ? "#44493E" : "#C4C9BC"));
+        return d;
+    }
+
     private static GradientDrawable roundedBox(Activity activity, String hex) {
         GradientDrawable d = new GradientDrawable();
         d.setColor(Color.parseColor(hex));
-        d.setCornerRadius(dp(activity, 18));
+        d.setCornerRadius(dp(activity, 14));
         return d;
     }
 
