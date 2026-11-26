@@ -96,7 +96,16 @@ public class AddCloudEngineBottomSheet {
             if (dataUrl.length() > MAX_STORED_DATA_URL_LENGTH) {
                 throw new IllegalStateException("参考音频过大（本机最多保存约 1.5 MB），请选择更短的音频");
             }
-            cfg.referenceAudioBase64 = dataUrl;
+            java.io.File dir = new java.io.File(activity.getFilesDir(), "cloud_clone_audio");
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+            String storedName = "clone_" + UUID.randomUUID().toString().substring(0, 8) + ".txt";
+            java.io.File outFile = new java.io.File(dir, storedName);
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile)) {
+                fos.write(dataUrl.getBytes("UTF-8"));
+            }
+            cfg.referenceAudioBase64 = "cloud_file:" + storedName;
             cfg.referenceAudioName = fileName;
 
             Button pickBtn = activePickAudioBtnRef.get();
@@ -542,7 +551,7 @@ public class AddCloudEngineBottomSheet {
             statusTv.setText("正在测试连接...");
             testBtn.setEnabled(false);
             new Thread(() -> {
-                String res = CloudAiTtsEngine.testConnection(config);
+                String res = CloudAiTtsEngine.testConnection(activity, config);
                 activity.runOnUiThread(() -> {
                     testBtn.setEnabled(true);
                     statusTv.setTextColor(res.startsWith("连接成功")
@@ -961,7 +970,9 @@ public class AddCloudEngineBottomSheet {
 
         final CloudTtsConfig cloneHolder = new CloudTtsConfig();
         if (isClone && existingSp != null && !TextUtils.isEmpty(existingSp.param)
-                && (existingSp.param.startsWith("data:audio/") || existingSp.param.length() > 128)) {
+                && (existingSp.param.startsWith("cloud_file:")
+                    || existingSp.param.startsWith("data:audio/")
+                    || existingSp.param.length() > 128)) {
             cloneHolder.referenceAudioBase64 = existingSp.param;
             cloneHolder.referenceAudioName = !TextUtils.isEmpty(existingSp.code) ? existingSp.code : cfg.referenceAudioName;
         }

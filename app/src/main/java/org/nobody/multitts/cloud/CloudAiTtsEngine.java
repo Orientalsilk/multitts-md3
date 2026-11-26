@@ -64,7 +64,9 @@ public class CloudAiTtsEngine implements h {
                     && "mimo-v2.5-tts-voicedesign".equalsIgnoreCase(this.config.model);
             if (isVoiceClone) {
                 if (!TextUtils.isEmpty(speaker.param)
-                        && (speaker.param.startsWith("data:audio/") || speaker.param.length() > 128)) {
+                        && (speaker.param.startsWith("cloud_file:")
+                            || speaker.param.startsWith("data:audio/")
+                            || speaker.param.length() > 128)) {
                     this.config.referenceAudioBase64 = speaker.param;
                 }
             } else if (isVoiceDesign) {
@@ -138,13 +140,17 @@ public class CloudAiTtsEngine implements h {
     }
 
     public static String testConnection(CloudTtsConfig testConfig) {
+        return testConnection(null, testConfig);
+    }
+
+    public static String testConnection(Context ctx, CloudTtsConfig testConfig) {
         long start = System.currentTimeMillis();
         try {
             Engine dummy = new Engine();
             dummy.type = testConfig.providerType.engineType;
             dummy.url = testConfig.baseUrl;
             dummy.param = testConfig.toParamJson();
-            CloudAiTtsEngine engine = new CloudAiTtsEngine(null, dummy, null);
+            CloudAiTtsEngine engine = new CloudAiTtsEngine(ctx, dummy, null);
             byte[] result = engine.synthesizeInternal(1.0f, 1.0f, "连接测试成功");
             long cost = System.currentTimeMillis() - start;
             if (result != null && result.length > 0) {
@@ -328,6 +334,9 @@ public class CloudAiTtsEngine implements h {
                 String refAudio = !TextUtils.isEmpty(config.referenceAudioBase64)
                         ? config.referenceAudioBase64.trim()
                         : resolveVoice(CloudTtsProviderType.MIMO);
+                if (!TextUtils.isEmpty(refAudio) && refAudio.startsWith("cloud_file:")) {
+                    refAudio = readCloneAudioFile(context, refAudio.substring("cloud_file:".length()));
+                }
                 if (TextUtils.isEmpty(refAudio)
                         || "mimo_default".equalsIgnoreCase(refAudio)
                         || "alloy".equalsIgnoreCase(refAudio)) {
@@ -426,6 +435,26 @@ public class CloudAiTtsEngine implements h {
             throw new IOException("MiMo TTS 没有返回音频数据");
         }
         return pcm16MonoToWav(pcmOut.toByteArray(), 24000);
+    }
+
+    private static String readCloneAudioFile(Context ctx, String fileName) throws IOException {
+        if (ctx == null || TextUtils.isEmpty(fileName)) {
+            throw new IOException("无法读取本地参考音频文件（缺少上下文）");
+        }
+        java.io.File dir = new java.io.File(ctx.getFilesDir(), "cloud_clone_audio");
+        java.io.File f = new java.io.File(dir, fileName);
+        if (!f.isFile()) {
+            throw new IOException("参考音频文件不存在，请重新选择：" + fileName);
+        }
+        try (java.io.InputStream is = new java.io.FileInputStream(f);
+             ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) != -1) {
+                bos.write(buf, 0, n);
+            }
+            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        }
     }
 
     // 4. Fish Audio (https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech)

@@ -251,31 +251,45 @@ public class CloudEngineActivity extends Activity {
 
     private void reloadVoices() {
         listContainer.removeAllViews();
-        addBannerHint("点引擎右侧「+ 添加音色」可挂载多个音色；回到主界面下拉列表或重启即可同步顶栏。");
-        List<Engine> all = loadEnginesViaReflection();
-        int totalSpeakers = 0;
-        for (Engine e : all) {
-            if (!CloudTtsProviderType.isCloudType(e.type)) {
-                continue;
-            }
-            List<Speaker> speakers = loadSpeakersForGroupViaReflection(e.code);
-            CloudTtsProviderType pt = CloudTtsProviderType.fromEngineType(e.type);
-            String title = (!TextUtils.isEmpty(e.name) ? e.name : e.code)
-                    + " · " + (pt != null ? pt.displayName : e.type)
-                    + " (" + speakers.size() + ")";
-            addVoiceGroupHeader(e, title);
-            if (speakers.isEmpty()) {
-                addHint("暂无音色，点右上角「+ 添加音色」即可添加");
-            } else {
-                for (Speaker sp : speakers) {
-                    totalSpeakers++;
-                    addSpeakerCard(e, sp);
+        addHint("正在加载云端音色...");
+        new Thread(() -> {
+            final List<Engine> all = loadEnginesViaReflection();
+            final List<Engine> cloudEngines = new ArrayList<>();
+            final List<List<Speaker>> groups = new ArrayList<>();
+            for (Engine e : all) {
+                if (!CloudTtsProviderType.isCloudType(e.type)) {
+                    continue;
                 }
+                cloudEngines.add(e);
+                groups.add(loadSpeakersForGroupViaReflection(e.code));
             }
-        }
-        if (totalSpeakers == 0) {
-            addHint("暂无已生成的云端音色，请先切换到「引擎」标签添加并保存云引擎。");
-        }
+            runOnUiThread(() -> {
+                if (!showingVoices || isFinishing()) return;
+                listContainer.removeAllViews();
+                addBannerHint("点引擎右侧「+ 添加音色」可挂载多个音色；回到主界面下拉列表或重启即可同步顶栏。");
+                int totalSpeakers = 0;
+                for (int i = 0; i < cloudEngines.size(); i++) {
+                    Engine e = cloudEngines.get(i);
+                    List<Speaker> speakers = groups.get(i);
+                    CloudTtsProviderType pt = CloudTtsProviderType.fromEngineType(e.type);
+                    String title = (!TextUtils.isEmpty(e.name) ? e.name : e.code)
+                            + " · " + (pt != null ? pt.displayName : e.type)
+                            + " (" + speakers.size() + ")";
+                    addVoiceGroupHeader(e, title);
+                    if (speakers.isEmpty()) {
+                        addHint("暂无音色，点右上角「+ 添加音色」即可添加");
+                    } else {
+                        for (Speaker sp : speakers) {
+                            totalSpeakers++;
+                            addSpeakerCard(e, sp);
+                        }
+                    }
+                }
+                if (totalSpeakers == 0) {
+                    addHint("暂无已生成的云端音色，请先切换到「引擎」标签添加并保存云引擎。");
+                }
+            });
+        }).start();
     }
 
     private void addSpeakerCard(Engine engine, Speaker sp) {
