@@ -171,9 +171,15 @@ public class CloudEngineActivity extends Activity {
             for (int i = 0; i < values.length; i++) {
                 menu.getMenu().add(0, i, i, "添加 " + values[i].displayName);
             }
+            menu.getMenu().add(0, values.length, values.length, "添加 自定义 HTTP 协议 TTS");
             menu.setOnMenuItemClickListener(item -> {
-                CloudTtsProviderType chosen = values[item.getItemId()];
-                AddCloudEngineBottomSheet.show(this, chosen, e -> reloadContent());
+                int idx = item.getItemId();
+                if (idx < values.length) {
+                    CloudTtsProviderType chosen = values[idx];
+                    AddCloudEngineBottomSheet.show(this, chosen, e -> reloadContent());
+                } else {
+                    AddCloudEngineBottomSheet.showCustomHttpDialog(this, null, e -> reloadContent());
+                }
                 return true;
             });
             menu.show();
@@ -451,13 +457,29 @@ public class CloudEngineActivity extends Activity {
             }
         }
 
-        addHeader("HTTP 协议 TTS (" + httpList.size() + ")");
-        if (httpList.isEmpty()) {
+        java.util.LinkedHashMap<String, List<Engine>> httpGroups = new java.util.LinkedHashMap<>();
+        for (Engine e : httpList) {
+            String key = httpFamilyKey(e);
+            List<Engine> grp = httpGroups.get(key);
+            if (grp == null) {
+                grp = new ArrayList<>();
+                httpGroups.put(key, grp);
+            }
+            grp.add(e);
+        }
+        addHeader("HTTP 协议 TTS (" + httpGroups.size() + " 组 / " + httpList.size() + " 项)");
+        if (httpGroups.isEmpty()) {
             addHint("暂无 HTTP TTS 引擎");
         } else {
-            for (Engine e : httpList) {
-                String urlHost = !TextUtils.isEmpty(e.url) ? e.url : ("HTTP 引擎 · " + e.code);
-                addEngineCard(e, urlHost, false, true);
+            for (java.util.Map.Entry<String, List<Engine>> entry : httpGroups.entrySet()) {
+                List<Engine> grp = entry.getValue();
+                if (grp.size() == 1) {
+                    Engine e = grp.get(0);
+                    String urlHost = !TextUtils.isEmpty(e.url) ? e.url : ("HTTP 引擎 · " + e.code);
+                    addEngineCard(e, urlHost, false, true);
+                } else {
+                    addHttpGroupCard(entry.getKey(), grp);
+                }
             }
         }
 
@@ -468,6 +490,88 @@ public class CloudEngineActivity extends Activity {
                 addEngineCard(e, sub, false, false);
             }
         }
+    }
+
+    private static String httpFamilyKey(Engine e) {
+        String raw = !TextUtils.isEmpty(e.name) ? e.name.trim() : (e.code != null ? e.code : "HTTP");
+        String cleaned = raw
+                .replaceAll("(?i)\\s*\\([^)]*\\)", "")
+                .replaceAll("(?i)\\s+v?\\d+(?:\\.\\d+)*(?:\\s+(?:Flash-Lite|Flash|Pro|Lite|TTS|Preview|Turbo))*", "")
+                .replaceAll("(?i)\\s+(?:Flash-Lite|Flash|Pro|Lite|TTS)$", "")
+                .trim();
+        return TextUtils.isEmpty(cleaned) ? raw : cleaned;
+    }
+
+    private void addHttpGroupCard(String familyTitle, final List<Engine> versions) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(cCard());
+        bg.setCornerRadius(dp(16));
+        card.setBackground(bg);
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+
+        LinearLayout textCol = new LinearLayout(this);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+        TextView nameTv = new TextView(this);
+        nameTv.setText(familyTitle);
+        nameTv.setTextSize(15);
+        nameTv.setTypeface(Typeface.DEFAULT_BOLD);
+        nameTv.setTextColor(cTextPrimary());
+        nameTv.setSingleLine(true);
+        nameTv.setEllipsize(TextUtils.TruncateAt.END);
+
+        StringBuilder sb = new StringBuilder("已合并 " + versions.size() + " 个版本：");
+        for (int i = 0; i < versions.size(); i++) {
+            if (i > 0) sb.append(" · ");
+            Engine ve = versions.get(i);
+            sb.append(!TextUtils.isEmpty(ve.name) ? ve.name : ve.code);
+        }
+        TextView subTv = new TextView(this);
+        subTv.setText(sb.toString());
+        subTv.setTextSize(12);
+        subTv.setTextColor(cTextSecondary());
+        subTv.setSingleLine(true);
+        subTv.setEllipsize(TextUtils.TruncateAt.END);
+        subTv.setPadding(0, dp(2), 0, 0);
+
+        textCol.addView(nameTv);
+        textCol.addView(subTv);
+        card.addView(textCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView listBtn = makeChip("版本 (" + versions.size() + ")", cCardHigh(), cTextPrimary());
+        listBtn.setOnClickListener(v -> {
+            PopupMenu pm = new PopupMenu(this, listBtn);
+            for (int i = 0; i < versions.size(); i++) {
+                Engine ve = versions.get(i);
+                pm.getMenu().add(0, i, i, !TextUtils.isEmpty(ve.name) ? ve.name : ve.code);
+            }
+            pm.setOnMenuItemClickListener(item -> {
+                Engine chosen = versions.get(item.getItemId());
+                new AlertDialog.Builder(this)
+                        .setTitle(!TextUtils.isEmpty(chosen.name) ? chosen.name : chosen.code)
+                        .setMessage("类型：" + chosen.type + "\n代号：" + chosen.code + "\n接口：" + (!TextUtils.isEmpty(chosen.url) ? chosen.url : "(脚本)"))
+                        .setPositiveButton("编辑此版本", (d, w) -> AddCloudEngineBottomSheet.showCustomHttpDialog(this, chosen, saved -> reloadContent()))
+                        .setNeutralButton("关闭", null)
+                        .setNegativeButton("删除此版本", (d, w) -> {
+                            deleteEngineViaReflection(chosen);
+                            reloadContent();
+                        })
+                        .show();
+                return true;
+            });
+            pm.show();
+        });
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        btnLp.leftMargin = dp(8);
+        card.addView(listBtn, btnLp);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(10);
+        listContainer.addView(card, lp);
     }
 
     private void addVoiceGroupHeader(final Engine engine, String titleText) {
@@ -588,10 +692,13 @@ public class CloudEngineActivity extends Activity {
         textCol.addView(subTv);
         card.addView(textCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView editBtn = makeChip(isCloud ? "编辑" : "详情", cCardHigh(), cTextPrimary());
+        boolean isHttp = isHttpEngine(e);
+        TextView editBtn = makeChip((isCloud || isHttp) ? "编辑" : "详情", cCardHigh(), cTextPrimary());
         editBtn.setOnClickListener(v -> {
             if (isCloud) {
                 AddCloudEngineBottomSheet.show(this, e, saved -> reloadContent());
+            } else if (isHttp) {
+                AddCloudEngineBottomSheet.showCustomHttpDialog(this, e, saved -> reloadContent());
             } else {
                 showHttpEngineInfo(e);
             }
@@ -685,8 +792,21 @@ public class CloudEngineActivity extends Activity {
     private List<Engine> loadEnginesViaReflection() {
         try {
             Class<?> helper = Class.forName("K6.d");
-            Method m = helper.getMethod("c");
-            Object res = m.invoke(null);
+            Object db = helper.getMethod("a").invoke(null);
+            try {
+                Object dao = db.getClass().getMethod("engineDao").invoke(db);
+                Object res = dao.getClass().getMethod("d").invoke(dao);
+                if (res instanceof List<?>) {
+                    return (List<Engine>) res;
+                }
+            } finally {
+                try { db.getClass().getMethod("close").invoke(db); } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            Class<?> helper = Class.forName("K6.d");
+            Object res = helper.getMethod("c").invoke(null);
             if (res instanceof List<?>) {
                 return (List<Engine>) res;
             }

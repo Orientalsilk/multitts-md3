@@ -165,7 +165,7 @@ public class CloudAiTtsEngine implements h {
             case MIMO:
                 return callMimo(text);
             case FISHAUDIO:
-                return callFishAudio(text);
+                return callFishAudio(speed, text);
             case VOLCENGINE:
                 return callVolcengine(speed, pitch, text);
             case AZURE:
@@ -264,18 +264,42 @@ public class CloudAiTtsEngine implements h {
                 executeBytes("POST", url, headers, body.toString().getBytes(StandardCharsets.UTF_8)),
                 StandardCharsets.UTF_8);
         JSONObject resp = new JSONObject(jsonStr);
-        JSONObject inlineData = resp.getJSONArray("candidates")
-                .getJSONObject(0)
-                .getJSONObject("content")
-                .getJSONArray("parts")
-                .getJSONObject(0)
-                .getJSONObject("inlineData");
+        JSONArray candidates = resp.optJSONArray("candidates");
+        if (candidates == null || candidates.length() == 0) {
+            throw new IOException("Gemini 未返回候选结果：" + jsonStr);
+        }
+        JSONObject firstCand = candidates.getJSONObject(0);
+        JSONObject content = firstCand.optJSONObject("content");
+        JSONArray parts = content != null ? content.optJSONArray("parts") : null;
+        JSONObject inlineData = null;
+        if (parts != null) {
+            for (int i = 0; i < parts.length(); i++) {
+                JSONObject p = parts.optJSONObject(i);
+                if (p != null && p.has("inlineData")) {
+                    inlineData = p.optJSONObject("inlineData");
+                    break;
+                }
+            }
+        }
+        if (inlineData == null || TextUtils.isEmpty(inlineData.optString("data"))) {
+            String reason = firstCand.optString("finishReason", "UNKNOWN");
+            throw new IOException("Gemini 未返回音频数据 (finishReason=" + reason + ")");
+        }
         String mimeType = inlineData.optString("mimeType", "audio/pcm").toLowerCase(Locale.US);
         byte[] raw = Base64.decode(inlineData.getString("data"), Base64.DEFAULT);
         if (mimeType.contains("wav") || mimeType.contains("mpeg") || mimeType.contains("mp3")) {
             return raw;
         }
-        return pcm16MonoToWav(raw, 24000);
+        int sampleRate = 24000;
+        int rateIdx = mimeType.indexOf("rate=");
+        if (rateIdx >= 0) {
+            try {
+                String tail = mimeType.substring(rateIdx + 5).split("[;\\s]")[0];
+                int parsed = Integer.parseInt(tail);
+                if (parsed >= 8000 && parsed <= 96000) sampleRate = parsed;
+            } catch (Throwable ignored) {}
+        }
+        return pcm16MonoToWav(raw, sampleRate);
     }
 
     // 3. MimoCloudTtsProvider
@@ -404,15 +428,17 @@ public class CloudAiTtsEngine implements h {
         return pcm16MonoToWav(pcmOut.toByteArray(), 24000);
     }
 
-    // 4. Fish Audio
-    private byte[] callFishAudio(String text) throws Exception {
+    // 4. Fish Audio (https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech)
+    private byte[] callFishAudio(float speed, String text) throws Exception {
         String base = cleanBaseUrl(config.effectiveBaseUrl());
         String url = base.endsWith("/tts") ? base : base + "/tts";
         String voice = resolveVoice(CloudTtsProviderType.FISHAUDIO);
+        float clampedSpeed = Math.max(0.5f, Math.min(2.0f, speed));
 
         JSONObject body = new JSONObject();
         body.put("text", text);
         body.put("format", "wav");
+        body.put("prosody", new JSONObject().put("speed", clampedSpeed).put("volume", 0));
         if (!TextUtils.isEmpty(voice)) {
             body.put("reference_id", voice);
         }
@@ -437,7 +463,8 @@ public class CloudAiTtsEngine implements h {
         String[] parts = voice.split("-");
         String locale = parts.length >= 2 ? (parts[0] + "-" + parts[1]) : "zh-CN";
         int pitchPct = Math.max(-100, Math.min(100, Math.round((pitch - 1.0f) * 100)));
-        String prosody = "<prosody rate=\"" + speed + "\" pitch=\"" + pitchPct + "%\" volume=\"0%\">"
+        String pitchStr = (pitchPct >= 0 ? "+" : "") + pitchPct + "%";
+        String prosody = "<prosody rate=\"" + speed + "\" pitch=\"" + pitchStr + "\" volume=\"0%\">"
                 + escapeXml(text) + "</prosody>";
         String inner = !TextUtils.isEmpty(config.style)
                 ? "<mstts:express-as style=\"" + escapeXml(config.style) + "\">" + prosody + "</mstts:express-as>"
